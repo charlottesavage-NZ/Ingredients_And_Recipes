@@ -37,6 +37,17 @@ let currentHouseholdMembers = [];
 // every time loadEverything() runs again after a vote.
 let personDropdownPopulated = false;
 
+// Same idea as personDropdownPopulated, but for the vote-filter
+// dropdown's per-person options, which also only need to be built once.
+let voteFilterPopulated = false;
+
+// Current values of the three filter controls. Empty string means
+// "not filtering on this one". All three combine together (AND) -
+// see filterRecipes() below.
+let currentVoteFilter = '';
+let currentIngredientFilter = '';
+let currentNameFilter = '';
+
 // -------------------------------------------------------------
 // Weight/volume conversion tables - same idea as script.js, but
 // duplicated here since this is a separate page with its own
@@ -150,6 +161,128 @@ document.getElementById('person-select').addEventListener('change', function(eve
 });
 
 // -------------------------------------------------------------
+// Fills the vote-filter dropdown with a "likes" and "dislikes"
+// option for every household member, added after the fixed "All
+// recipes" / "Everyone likes" / "Everyone dislikes" options that
+// already sit in the HTML. Only runs once, same reasoning as
+// populatePersonDropdown above.
+// -------------------------------------------------------------
+function populateVoteFilterOptions(people) {
+    if (voteFilterPopulated) return;
+
+    const select = document.getElementById('vote-filter');
+    people.forEach(person => {
+        const likeOption = document.createElement('option');
+        likeOption.value = `${person}|like`;
+        likeOption.textContent = `${person} likes`;
+        select.appendChild(likeOption);
+
+        const dislikeOption = document.createElement('option');
+        dislikeOption.value = `${person}|dislike`;
+        dislikeOption.textContent = `${person} dislikes`;
+        select.appendChild(dislikeOption);
+    });
+
+    voteFilterPopulated = true;
+}
+
+// -------------------------------------------------------------
+// Checks one recipe against the vote-filter dropdown's current
+// value. Handles four kinds of value:
+// - ""                  -> no filter, everything passes
+// - "everyone-likes"    -> every household member's vote is "like"
+// - "everyone-dislikes" -> every household member's vote is "dislike"
+// - "Todd|like" etc.    -> that one specific person voted that way
+// -------------------------------------------------------------
+function matchesVoteFilter(recipe) {
+    if (!currentVoteFilter) return true;
+
+    if (currentVoteFilter === 'everyone-likes') {
+        return currentHouseholdMembers.every(person =>
+            recipe.votes.some(v => v.person === person && v.vote === 'like')
+        );
+    }
+
+    if (currentVoteFilter === 'everyone-dislikes') {
+        return currentHouseholdMembers.every(person =>
+            recipe.votes.some(v => v.person === person && v.vote === 'dislike')
+        );
+    }
+
+    // Any other value is "Person|vote", e.g. "Todd|like"
+    const [person, vote] = currentVoteFilter.split('|');
+    return recipe.votes.some(v => v.person === person && v.vote === vote);
+}
+
+// -------------------------------------------------------------
+// Checks one recipe against the ingredient-filter text box.
+// Matches if ANY of the recipe's ingredient names contain the
+// typed text (case-insensitive, partial match) - so typing "mince"
+// finds recipes using "Beef Mince" or "Lamb Mince".
+// -------------------------------------------------------------
+function matchesIngredientFilter(recipe) {
+    if (!currentIngredientFilter) return true;
+
+    const search = currentIngredientFilter.toLowerCase();
+    return recipe.ingredients.some(ing =>
+        ing.ingredient_name.toLowerCase().includes(search)
+    );
+}
+
+// -------------------------------------------------------------
+// Checks one recipe against the recipe-name-filter text box.
+// Same partial, case-insensitive match as the ingredient filter.
+// -------------------------------------------------------------
+function matchesNameFilter(recipe) {
+    if (!currentNameFilter) return true;
+    return recipe.name.toLowerCase().includes(currentNameFilter.toLowerCase());
+}
+
+// -------------------------------------------------------------
+// Applies all three filters together (AND) to a list of recipes.
+// A recipe only shows up if it passes every filter that's
+// currently set - any filter left blank/default is skipped.
+// -------------------------------------------------------------
+function filterRecipes(recipes) {
+    return recipes.filter(recipe =>
+        matchesVoteFilter(recipe) &&
+        matchesIngredientFilter(recipe) &&
+        matchesNameFilter(recipe)
+    );
+}
+
+// Re-render using the currently loaded recipes whenever a filter
+// control changes - no need to re-fetch from the server, since
+// filtering only affects what's DISPLAYED, not what's stored.
+document.getElementById('vote-filter').addEventListener('change', function(event) {
+    currentVoteFilter = event.target.value;
+    renderRecipes(filterRecipes(currentRecipes));
+});
+
+document.getElementById('ingredient-filter').addEventListener('input', function(event) {
+    currentIngredientFilter = event.target.value.trim();
+    renderRecipes(filterRecipes(currentRecipes));
+});
+
+document.getElementById('name-filter').addEventListener('input', function(event) {
+    currentNameFilter = event.target.value.trim();
+    renderRecipes(filterRecipes(currentRecipes));
+});
+
+// Resets all three filter controls and re-renders the full list.
+document.getElementById('clear-filters-btn').addEventListener('click', function() {
+    currentVoteFilter = '';
+    currentIngredientFilter = '';
+    currentNameFilter = '';
+
+    document.getElementById('vote-filter').value = '';
+    document.getElementById('ingredient-filter').value = '';
+    document.getElementById('name-filter').value = '';
+
+    renderRecipes(filterRecipes(currentRecipes));
+});
+
+// -------------------------------------------------------------
 // Adds one ingredient row to the form. Optionally pre-fills it
 // with existing values - used both for a blank new row, and for
 // filling in a recipe's existing ingredients when editing.
@@ -191,6 +324,126 @@ addIngredientRow();
 document.getElementById('add-ingredient-btn').addEventListener('click', () => addIngredientRow());
 
 // -------------------------------------------------------------
+// UPLOAD A RECIPE FROM A TEXT FILE
+// Lets you skip typing everything by hand. Write (or paste, or
+// get an AI to reformat for you) a recipe into a plain .txt file
+// using this exact layout, then upload it here:
+//
+//   Title: Spaghetti Bolognese
+//   Ingredients:
+//   Beef mince, 500, g
+//   Tinned tomatoes, 400, g
+//   Onion, 1, each
+//   Instructions:
+//   Brown the mince in a pan.
+//   Add onion and cook until soft.
+//
+// This ONLY fills in the form below - it doesn't save anything by
+// itself. You still need to look it over and click "Save Recipe"
+// (or "Update Recipe"), exactly as if you'd typed it in yourself.
+// -------------------------------------------------------------
+const recipeFileInput = document.getElementById('recipe-file-input');
+
+recipeFileInput.addEventListener('change', function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // FileReader reads the file's contents in the background, then
+    // fires "load" once the whole file is available as text.
+    const reader = new FileReader();
+
+    reader.onload = function(loadEvent) {
+        const fileText = loadEvent.target.result;
+        const parsed = parseRecipeFile(fileText);
+
+        if (!parsed) {
+            alert("Could not read that file. Make sure it has Title:, Ingredients:, and Instructions: sections, in that order.");
+            return;
+        }
+
+        fillFormFromParsedRecipe(parsed);
+
+        // Clear the file input so uploading the SAME file again later
+        // (e.g. after fixing a typo in it) still fires "change".
+        recipeFileInput.value = '';
+    };
+
+    reader.readAsText(file);
+});
+
+// -------------------------------------------------------------
+// Turns the raw text of an uploaded file into a plain object:
+// { name, instructions, ingredients: [{ ingredient_name, quantity, unit }] }
+// Returns null if the file doesn't have the sections we expect, in
+// the order we expect them.
+// -------------------------------------------------------------
+function parseRecipeFile(fileText) {
+    const lines = fileText.split('\n').map(line => line.trim());
+
+    const titleLineIndex = lines.findIndex(line => line.toLowerCase().startsWith('title:'));
+    const ingredientsLineIndex = lines.findIndex(line => line.toLowerCase().startsWith('ingredients:'));
+    const instructionsLineIndex = lines.findIndex(line => line.toLowerCase().startsWith('instructions:'));
+
+    // If any section is missing, or they're not in Title ->
+    // Ingredients -> Instructions order, we can't reliably parse it.
+    if (titleLineIndex === -1 || ingredientsLineIndex === -1 || instructionsLineIndex === -1) {
+        return null;
+    }
+    if (ingredientsLineIndex < titleLineIndex || instructionsLineIndex < ingredientsLineIndex) {
+        return null;
+    }
+
+    // The recipe name is whatever comes after "Title:" on that line.
+    const name = lines[titleLineIndex].slice('title:'.length).trim();
+
+    // Ingredient lines sit between "Ingredients:" and "Instructions:".
+    // Each one looks like "Name, quantity, unit" - split by comma,
+    // same layout as the ingredient rows in the form.
+    const ingredientLines = lines
+        .slice(ingredientsLineIndex + 1, instructionsLineIndex)
+        .filter(line => line.length > 0);
+
+    const ingredients = ingredientLines.map(line => {
+        const [ingName, quantity, unit] = line.split(',').map(part => part.trim());
+        return {
+            ingredient_name: ingName || '',
+            quantity: quantity || '',
+            unit: (unit || 'g').toLowerCase()
+        };
+    });
+
+    // Everything after "Instructions:" is the method. Keep the line
+    // breaks (joined back with \n) so paragraph structure carries
+    // over into the textarea, instead of squashing it into one line.
+    const instructions = lines
+        .slice(instructionsLineIndex + 1)
+        .join('\n')
+        .trim();
+
+    return { name, instructions, ingredients };
+}
+
+// -------------------------------------------------------------
+// Fills the Add Recipe form with a parsed recipe, replacing
+// whatever ingredient rows are currently there. This does NOT
+// save anything - it just gets the form ready for you to check
+// over and click "Save Recipe" yourself.
+// -------------------------------------------------------------
+function fillFormFromParsedRecipe(parsed) {
+    recipeNameInput.value = parsed.name;
+    recipeInstructionsInput.value = parsed.instructions;
+
+    ingredientRowsContainer.innerHTML = "";
+
+    if (parsed.ingredients.length === 0) {
+        // Always leave at least one row, same as resetForm() does.
+        addIngredientRow();
+    } else {
+        parsed.ingredients.forEach(ing => addIngredientRow(ing));
+    }
+}
+
+// -------------------------------------------------------------
 // Loads recipes, the combined inventory, AND the household member
 // list before rendering, since each recipe card needs all three.
 // Promise.all runs all three fetches at the same time rather than
@@ -207,7 +460,12 @@ function loadEverything() {
             currentInventory = inventory;
             currentHouseholdMembers = people;
             populatePersonDropdown(people);
-            renderRecipes(recipes);
+            populateVoteFilterOptions(people);
+
+            // currentRecipes always holds the FULL list (needed for
+            // vote/edit/delete lookups elsewhere), but we only ever
+            // display the filtered subset.
+            renderRecipes(filterRecipes(recipes));
         })
         .catch(error => {
             console.error('Could not load recipes/inventory/household members from server:', error);

@@ -32,6 +32,16 @@
             <section id="add-recipe-section" class="inventory-section">
                 <h2>Add a Recipe</h2>
 
+                <!-- Optional shortcut: upload a .txt file instead of typing
+                     everything in by hand. The file needs to follow a
+                     Title / Ingredients / Instructions layout - recipes.js
+                     reads it and fills in the form below for you to check
+                     over. Nothing is saved until you click "Save Recipe". -->
+                <div id="recipe-upload-section">
+                    <label for="recipe-file-input">Upload a recipe text file:</label>
+                    <input type="file" id="recipe-file-input" accept=".txt">
+                </div>
+
                 <form id="recipe-form">
                     <input type="text" id="recipe-name" placeholder="Recipe Name" required>
                     <textarea id="recipe-instructions" placeholder="Instructions" rows="4" required></textarea>
@@ -49,6 +59,34 @@
                     <button type="button" id="add-ingredient-btn">+ Add Ingredient</button>
                     <button type="submit">Save Recipe</button>
                 </form>
+            </section>
+
+            <!-- ===================== FILTER RECIPES ===================== -->
+            <!-- All three filters combine together (AND) - e.g. picking
+                 "Todd likes" AND typing "mince" only shows recipes that
+                 are BOTH liked by Todd AND contain an ingredient matching
+                 "mince". recipes.js reads these values every time any of
+                 them changes and re-renders the list below. -->
+            <section id="filter-section" class="inventory-section">
+                <h2>Filter Recipes</h2>
+
+                <label for="vote-filter">Show recipes where:</label>
+                <select id="vote-filter">
+                    <option value="">All recipes</option>
+                    <option value="everyone-likes">Everyone likes</option>
+                    <option value="everyone-dislikes">Everyone dislikes</option>
+                    <!-- Per-person "X likes" / "X dislikes" options get
+                         added here by recipes.js once the household
+                         member list loads from the server. -->
+                </select>
+
+                <label for="ingredient-filter">Has ingredient:</label>
+                <input type="text" id="ingredient-filter" placeholder="e.g. Mince" list="ingredient-names-list">
+
+                <label for="name-filter">Recipe name contains:</label>
+                <input type="text" id="name-filter" placeholder="e.g. Spaghetti">
+
+                <button type="button" id="clear-filters-btn">Clear Filters</button>
             </section>
 
             <!-- ===================== RECIPE LIST ===================== -->

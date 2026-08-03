@@ -53,7 +53,7 @@ const COMMON_GROCERY_ITEMS = [
     'Onion', 'Garlic', 'Potato', 'Carrot', 'Broccoli', 'Capsicum',
     'Olive Oil', 'Vegetable Oil', 'Soy Sauce', 'Stock', 'Baked Beans',
     'Bread', 'Butter Beans', 'Chickpeas', 'Lentils', 'Tuna', 'Salmon',
-    'Gluten Free Pasta', 'Gluten Free Bread', 'Cream'
+    'Gluten Free Pasta', 'Gluten Free Bread'
 ];
 
 // -------------------------------------------------------------
