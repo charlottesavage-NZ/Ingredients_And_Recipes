@@ -65,6 +65,13 @@ function loadItemNameSuggestions() {
 
 loadItemNameSuggestions();
 
+// -------------------------------------------------------------
+// Holds whatever's currently typed into the search box. Starts
+// empty (no filtering). It's declared out here at the top level
+// so every section's renderItems() can read the same value.
+// -------------------------------------------------------------
+let searchTerm = '';
+
 function setupInventory(sectionName) {
 
     // Build the list element ID dynamically based on the section name.
@@ -99,14 +106,33 @@ function setupInventory(sectionName) {
     // -------------------------------------------------------------
     // Render function
     // This updates the <ul> list to show all items in the array
+    // that match the current search box text (matches everything
+    // if the search box is empty).
     // -------------------------------------------------------------
     function renderItems() {
 
         // Clear the current list so I can rebuild it fresh
         list.innerHTML = "";
 
-        // Loop through each item in the array
-        items.forEach(item => {
+        // Only keep items whose name contains the search text
+        // (case-insensitive, partial match - "mince" matches "Beef Mince").
+        const itemsToShow = items.filter(item =>
+            item.name.toLowerCase().includes(searchTerm)
+        );
+
+        // If there's an active search and nothing matched in this
+        // section, say so instead of just leaving it blank - avoids
+        // it looking broken when really it just means "none here".
+        if (searchTerm && itemsToShow.length === 0) {
+            const li = document.createElement('li');
+            li.textContent = "No matches in this section";
+            li.classList.add('no-matches');
+            list.appendChild(li);
+            return;
+        }
+
+        // Loop through each matching item
+        itemsToShow.forEach(item => {
 
             // Create a new <li> element for each item
             const li = document.createElement('li');
@@ -166,6 +192,13 @@ function setupInventory(sectionName) {
                 .catch(error => {
                     console.error(`Could not clear ${sectionName}:`, error);
                 });
+        },
+
+        // Lets code outside this function (the search box listener)
+        // trigger a re-render using whatever searchTerm is now set to,
+        // without needing to re-fetch anything from the server.
+        refresh() {
+            renderItems();
         }
     };
 }
@@ -215,6 +248,21 @@ form.addEventListener("submit", function(event) {
     form.reset();
 });
 
+
+// -------------------------------------------------------------
+// Search box - filters all four sections at once (pantry, fridge,
+// freezer, chest freezer). Typing "mince" only refreshes what's
+// DISPLAYED in each section; it never touches the server or the
+// saved CSV data.
+// -------------------------------------------------------------
+document.getElementById('item-search').addEventListener('input', function(event) {
+    searchTerm = event.target.value.trim().toLowerCase();
+
+    pantryInventory.refresh();
+    fridgeInventory.refresh();
+    freezerInventory.refresh();
+    chestInventory.refresh();
+});
 
 // -------------------------------------------------------------
 // Clear ALL inventories at once
