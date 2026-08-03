@@ -33,6 +33,11 @@
                          it in as the "Add Ingredient" button is clicked. -->
                     <div id="ingredient-rows"></div>
 
+                    <!-- Shared datalist for every ingredient name input.
+                         recipes.js fills this with known item names, the
+                         same way index.html suggests names for pantry items. -->
+                    <datalist id="ingredient-names-list"></datalist>
+
                     <button type="button" id="add-ingredient-btn">+ Add Ingredient</button>
                     <button type="submit">Save Recipe</button>
                 </form>

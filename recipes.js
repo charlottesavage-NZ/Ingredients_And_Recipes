@@ -91,6 +91,27 @@ function checkRecipeAvailability(recipe, inventory) {
 }
 
 // -------------------------------------------------------------
+// Loads every known item name and fills the shared <datalist>,
+// so ingredient name boxes suggest names already used in the
+// pantry or other recipes.
+// -------------------------------------------------------------
+function loadItemNameSuggestions() {
+    fetch(`${SERVER_URL}/item-names`)
+        .then(response => response.json())
+        .then(names => {
+            const datalist = document.getElementById('ingredient-names-list');
+            datalist.innerHTML = names
+                .map(name => `<option value="${name}"></option>`)
+                .join('');
+        })
+        .catch(error => {
+            console.error('Could not load item name suggestions:', error);
+        });
+}
+
+loadItemNameSuggestions();
+
+// -------------------------------------------------------------
 // Adds one ingredient row to the form. Optionally pre-fills it
 // with existing values - used both for a blank new row, and for
 // filling in a recipe's existing ingredients when editing.
@@ -104,7 +125,7 @@ function addIngredientRow(existing = null) {
     const unit = existing ? existing.unit : 'g';
 
     row.innerHTML = `
-        <input type="text" class="ingredient-name" placeholder="Ingredient Name" value="${name}">
+        <input type="text" class="ingredient-name" placeholder="Ingredient Name" value="${name}" list="ingredient-names-list">
         <input type="number" class="ingredient-quantity" placeholder="Quantity" value="${quantity}">
         <select class="ingredient-unit">
             <option value="g">grams (g)</option>
@@ -115,11 +136,18 @@ function addIngredientRow(existing = null) {
         </select>
     `;
 
+    // Set the dropdown to match the existing unit, since you can't
+    // do this through the HTML string above the way you can with
+    // a plain input's value.
     row.querySelector('.ingredient-unit').value = unit;
+
     ingredientRowsContainer.appendChild(row);
 }
 
+// Start with one empty ingredient row so the form isn't blank
 addIngredientRow();
+
+// Clicking "+ Add Ingredient" just adds another blank row
 document.getElementById('add-ingredient-btn').addEventListener('click', () => addIngredientRow());
 
 // -------------------------------------------------------------
@@ -155,6 +183,7 @@ function renderRecipes(recipes) {
         const card = document.createElement('div');
         card.classList.add('recipe-card');
 
+        // Turn the ingredients array into a simple bullet list of text
         const ingredientsHTML = recipe.ingredients
             .map(ing => `<li>${ing.ingredient_name} — ${ing.quantity} ${ing.unit}</li>`)
             .join('');
@@ -169,6 +198,8 @@ function renderRecipes(recipes) {
                   availability.missing.map(m => `<li>${m}</li>`).join('')
               }</ul>`;
 
+        // data-id stores the recipe's id directly on each button, so
+        // when clicked we know exactly which recipe it refers to.
         card.innerHTML = `
             <h3>${recipe.name}</h3>
             <ul>${ingredientsHTML}</ul>
@@ -182,6 +213,7 @@ function renderRecipes(recipes) {
     });
 }
 
+// Load existing recipes (and inventory) as soon as the page opens
 loadEverything();
 
 // -------------------------------------------------------------
@@ -194,10 +226,16 @@ function startEditingRecipe(recipe) {
     recipeNameInput.value = recipe.name;
     recipeInstructionsInput.value = recipe.instructions;
 
+    // Clear the current ingredient rows and rebuild them from
+    // this recipe's saved ingredients.
     ingredientRowsContainer.innerHTML = "";
     recipe.ingredients.forEach(ing => addIngredientRow(ing));
 
+    // Relabel the button so it's clear you're updating, not adding
     saveButton.textContent = "Update Recipe";
+
+    // Scroll up so the now-filled form is visible, since it might
+    // be off-screen if you clicked Edit further down the page.
     recipeForm.scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -223,6 +261,9 @@ recipeForm.addEventListener('submit', function(event) {
     const name = recipeNameInput.value.trim();
     const instructions = recipeInstructionsInput.value.trim();
 
+    // Gather every ingredient row into a plain array of objects.
+    // Rows left blank (no name typed) are skipped, so clicking
+    // "+ Add Ingredient" without filling it in doesn't save junk data.
     const ingredientRows = document.querySelectorAll('.ingredient-row');
     const ingredients = [];
 
@@ -245,6 +286,8 @@ recipeForm.addEventListener('submit', function(event) {
         return;
     }
 
+    // Decide whether we're creating a new recipe or updating one,
+    // based on whether editingRecipeId was set by clicking Edit.
     const url = editingRecipeId
         ? `${SERVER_URL}/recipes/${editingRecipeId}`
         : `${SERVER_URL}/recipes`;
@@ -266,11 +309,11 @@ recipeForm.addEventListener('submit', function(event) {
 });
 
 // -------------------------------------------------------------
-// Handles clicking any "Edit" or "Delete" button on a recipe card.
-// We listen on the whole list (event delegation) rather than on
-// each button individually, because the buttons are created
-// dynamically by renderRecipes() and don't exist yet when this
-// code first runs.
+// Handles clicking any "Edit" or "Delete" button on a recipe
+// card. We listen on the whole list (event delegation) rather
+// than on each button individually, because the buttons are
+// created dynamically by renderRecipes() and don't exist yet
+// when this code first runs.
 // -------------------------------------------------------------
 recipeList.addEventListener('click', function(event) {
 
@@ -289,6 +332,9 @@ recipeList.addEventListener('click', function(event) {
         fetch(`${SERVER_URL}/recipes/${recipeId}`, { method: 'DELETE' })
             .then(response => response.json())
             .then(() => {
+                // If you were editing the recipe you just deleted,
+                // reset the form so it doesn't try to "update"
+                // something that no longer exists.
                 if (editingRecipeId === recipeId) resetForm();
                 loadEverything();
             })

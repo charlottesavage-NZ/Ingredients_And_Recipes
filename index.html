@@ -20,7 +20,9 @@
         <header class="header">
             <!-- H1 here is to specify if we want to do .header h1 in css later, to modify just this header e.g font size -->
             <h1>What Food do we have?</h1>
-                
+
+            <!-- Simple navigation between pages. Each page is its own
+                 HTML file, so this is just plain links, not JavaScript. -->
             <nav class="main-nav">
                 <a href="index.html">Inventory</a>
                 <a href="recipes.html">Recipes</a>
@@ -40,8 +42,12 @@
                 <form id="house-form">
 
                     <!-- This is adding two input types, for Item Name and Quantity.
-                         using "required" prevents the form from submitting empty. Using type="number" ensures only numeric input is allowed. -->
-                    <input type="text" id="item-name" placeholder="Item Name" required>
+                         using "required" prevents the form from submitting empty. Using type="number" ensures only numeric input is allowed.
+                         The "list" attribute links this input to the datalist below, which
+                         JavaScript fills with known item names to suggest as you type. -->
+                    <input type="text" id="item-name" placeholder="Item Name" list="item-names-list" required>
+                    <datalist id="item-names-list"></datalist>
+
                     <input type="number" id="item-quantity" placeholder="Quantity" required>
 
                     <!-- This dropdown lets me choose the unit of measure for the item (grams, kg, each etc). -->

@@ -34,6 +34,26 @@ const RECIPES_FILE = 'recipes.csv';
 const RECIPE_INGREDIENTS_FILE = 'recipe_ingredients.csv';
 
 // -------------------------------------------------------------
+// A curated baseline of common grocery items with CORRECT
+// spelling. This exists so the dropdown always has trustworthy
+// suggestions available, even before you've typed anything
+// yourself - meaning the right spelling shows up as you type,
+// rather than only appearing after you've already used it once.
+// Feel free to add more items here any time you notice something
+// missing.
+// -------------------------------------------------------------
+const COMMON_GROCERY_ITEMS = [
+    'Tinned Tomatoes', 'Pasta Sauce', 'Tomato Paste',
+    'Mince', 'Chicken Breast', 'Chicken Thigh', 'Bacon', 'Sausages',
+    'Pasta', 'Rice', 'Flour', 'Sugar', 'Salt', 'Pepper',
+    'Milk', 'Butter', 'Cheese', 'Eggs', 'Yoghurt', 'Cream',
+    'Onion', 'Garlic', 'Potato', 'Carrot', 'Broccoli', 'Capsicum',
+    'Olive Oil', 'Vegetable Oil', 'Soy Sauce', 'Stock', 'Baked Beans',
+    'Bread', 'Butter Beans', 'Chickpeas', 'Lentils', 'Tuna', 'Salmon',
+    'Gluten Free Pasta', 'Gluten Free Bread', 'Cream'
+];
+
+// -------------------------------------------------------------
 // Weight unit conversion. Everything gets converted to grams
 // before it's merged/stored, so the existing merge logic below
 // (which matches by unit) doesn't need to change at all.
@@ -261,6 +281,44 @@ function readAllInventory(callback) {
     });
 }
 
+// -------------------------------------------------------------
+// Gathers every item name the system should suggest: the curated
+// baseline list PLUS every name already used in inventory or
+// recipes. Curated names go in first, so the correct spelling of
+// a common item is available as a suggestion even if you've never
+// typed it before.
+// -------------------------------------------------------------
+function getAllItemNames(callback) {
+    readAllInventory((err, inventoryItems) => {
+        if (err) return callback(err, null);
+
+        readRecipes((err, recipes) => {
+            if (err) return callback(err, null);
+
+            // Keyed by the LOWERCASE name, so "Tinned Tomatoes" and
+            // "tinned tomatoes" count as the same item and only show
+            // up once - we keep whichever casing we happen to see first.
+            const namesByKey = new Map();
+
+            function addName(name) {
+                const key = name.toLowerCase();
+                if (!namesByKey.has(key)) {
+                    namesByKey.set(key, name);
+                }
+            }
+
+            // Curated names go first, so they "win" if there's ever
+            // a casing clash with something you've typed yourself.
+            COMMON_GROCERY_ITEMS.forEach(addName);
+            inventoryItems.forEach(item => addName(item.name));
+            recipes.forEach(recipe => {
+                recipe.ingredients.forEach(ing => addName(ing.ingredient_name));
+            });
+
+            callback(null, Array.from(namesByKey.values()).sort());
+        });
+    });
+}
 
 const server = http.createServer((req, res) => {
 
@@ -361,61 +419,6 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // ---- DELETE a single recipe by id ----
-    // URL looks like /recipes/1234567890 - we need to pull the id
-    // out of the end of the URL.
-    if (req.url.startsWith('/recipes/') && req.method === 'DELETE') {
-        const recipeId = req.url.replace('/recipes/', '');
-
-        fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
-            if (err) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Could not read recipes');
-                return;
-            }
-
-            const recipes = parseCSV(recipesData);
-
-            // Keep every recipe EXCEPT the one being deleted
-            const remainingRecipes = recipes.filter(r => r.id !== recipeId);
-
-            fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read recipe ingredients');
-                    return;
-                }
-
-                const ingredients = parseCSV(ingredientsData);
-
-                // Also remove any ingredient rows that belonged to
-                // this recipe, otherwise they'd be orphaned - pointing
-                // to a recipe_id that no longer exists anywhere.
-                const remainingIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
-
-                fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], remainingRecipes), 'utf8', (err) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not save recipes');
-                        return;
-                    }
-
-                    fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], remainingIngredients), 'utf8', (err) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not save recipe ingredients');
-                            return;
-                        }
-
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ deleted: recipeId }));
-                    });
-                });
-            });
-        });
-        return;
-    }
-
     // ---- PUT: update an existing recipe by id ----
     // Same idea as POST (create), but instead of adding a new row,
     // we replace the existing recipe's data and completely swap out
@@ -494,8 +497,63 @@ const server = http.createServer((req, res) => {
         });
         return;
     }
-    
-// ---- Combined inventory across all four sections ----
+
+    // ---- DELETE a single recipe by id ----
+    // URL looks like /recipes/1234567890 - we need to pull the id
+    // out of the end of the URL.
+    if (req.url.startsWith('/recipes/') && req.method === 'DELETE') {
+        const recipeId = req.url.replace('/recipes/', '');
+
+        fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
+            if (err) {
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Could not read recipes');
+                return;
+            }
+
+            const recipes = parseCSV(recipesData);
+
+            // Keep every recipe EXCEPT the one being deleted
+            const remainingRecipes = recipes.filter(r => r.id !== recipeId);
+
+            fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
+                if (err) {
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Could not read recipe ingredients');
+                    return;
+                }
+
+                const ingredients = parseCSV(ingredientsData);
+
+                // Also remove any ingredient rows that belonged to
+                // this recipe, otherwise they'd be orphaned - pointing
+                // to a recipe_id that no longer exists anywhere.
+                const remainingIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
+
+                fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], remainingRecipes), 'utf8', (err) => {
+                    if (err) {
+                        res.writeHead(500, { 'Content-Type': 'text/plain' });
+                        res.end('Could not save recipes');
+                        return;
+                    }
+
+                    fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], remainingIngredients), 'utf8', (err) => {
+                        if (err) {
+                            res.writeHead(500, { 'Content-Type': 'text/plain' });
+                            res.end('Could not save recipe ingredients');
+                            return;
+                        }
+
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ deleted: recipeId }));
+                    });
+                });
+            });
+        });
+        return;
+    }
+
+    // ---- Combined inventory across all four sections ----
     // Used by the Recipes page to check "do we have enough of
     // this ingredient anywhere in the house?"
     if (req.url === '/inventory-all' && req.method === 'GET') {
@@ -511,6 +569,19 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // ---- All known item names (for dropdown/autocomplete suggestions) ----
+    if (req.url === '/item-names' && req.method === 'GET') {
+        getAllItemNames((err, names) => {
+            if (err) {
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Could not read item names');
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(names));
+        });
+        return;
+    }
 
     // req.url looks like "/pantry" - strip the leading slash to get
     // just the section name.

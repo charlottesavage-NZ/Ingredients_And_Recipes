@@ -4,7 +4,6 @@
 // which reads/writes a CSV file for this section.
 // I can reuse this function for each storage area instead of writing 4 separate scripts.
 // -------------------------------------------------------------
-
 // Base address of our local server. Every section talks to its own
 // address on the server, e.g. http://localhost:3000/pantry
 const SERVER_URL = 'http://localhost:3000';
@@ -45,8 +44,31 @@ function formatVolume(milliliters) {
     };
 }
 
+// -------------------------------------------------------------
+// Loads every known item name from the server and fills the
+// <datalist>, so typing in the Item Name box suggests names
+// already used anywhere in the house or in recipes.
+// -------------------------------------------------------------
+function loadItemNameSuggestions() {
+    fetch(`${SERVER_URL}/item-names`)
+        .then(response => response.json())
+        .then(names => {
+            const datalist = document.getElementById('item-names-list');
+            datalist.innerHTML = names
+                .map(name => `<option value="${name}"></option>`)
+                .join('');
+        })
+        .catch(error => {
+            console.error('Could not load item name suggestions:', error);
+        });
+}
+
+loadItemNameSuggestions();
+
 function setupInventory(sectionName) {
 
+    // Build the list element ID dynamically based on the section name.
+    // Example: "pantry" becomes pantry-list.
     const list = document.getElementById(`${sectionName}-list`);
 
     // Items start empty and get filled in once the server responds.
@@ -76,14 +98,22 @@ function setupInventory(sectionName) {
 
     // -------------------------------------------------------------
     // Render function
+    // This updates the <ul> list to show all items in the array
     // -------------------------------------------------------------
     function renderItems() {
+
+        // Clear the current list so I can rebuild it fresh
         list.innerHTML = "";
+
+        // Loop through each item in the array
         items.forEach(item => {
+
+            // Create a new <li> element for each item
             const li = document.createElement('li');
 
-            // Convert grams to kg or millilitres to L for display.
-            // Anything else (like "each") is shown exactly as stored.
+            // If it's stored in grams or millilitres, convert it to a
+            // nicer display (e.g. 10500g -> 10.5 kg). Anything else
+            // (like "each") is shown exactly as stored.
             let display;
             if (item.unit === 'g') {
                 display = formatWeight(item.quantity);
@@ -93,11 +123,15 @@ function setupInventory(sectionName) {
                 display = { quantity: item.quantity, unit: item.unit };
             }
 
+            // Set the text inside the <li> to show name, quantity, and unit
             li.textContent = `${item.name} — ${display.quantity} ${display.unit}`;
+
+            // Add the <li> to the list in the HTML
             list.appendChild(li);
         });
     }
 
+    // Return an object so the main script can update this inventory
     return {
         addItem(name, qtyNumber, unit) {
 
@@ -136,6 +170,7 @@ function setupInventory(sectionName) {
     };
 }
 
+
 // -------------------------------------------------------------
 // Create inventory managers for each storage area
 // -------------------------------------------------------------
@@ -144,42 +179,49 @@ const fridgeInventory = setupInventory("fridge");
 const freezerInventory = setupInventory("freezer");
 const chestInventory = setupInventory("chest");
 
+
 // -------------------------------------------------------------
 // Handle form submissions (adding an item anywhere in the house)
 // -------------------------------------------------------------
 const form = document.getElementById("house-form");
 
 form.addEventListener("submit", function(event) {
+
+    // Prevent the page from refreshing (default form behaviour)
     event.preventDefault();
 
+    // Get the values typed into the form
     const name = document.getElementById("item-name").value.trim();
     const quantity = document.getElementById("item-quantity").value.trim();
     const unit = document.getElementById("item-unit").value;
     const location = document.getElementById("item-location").value;
 
+    // Basic validation to ensure all fields are filled
     if (!name || !quantity || !unit || !location) {
         alert("Please enter a name, quantity, unit, and location.");
         return;
     }
 
+    // Convert quantity to a number (so negative values work)
     const qtyNumber = Number(quantity);
 
+    // Add the item to the correct inventory based on the dropdown selection
     if (location === "pantry") pantryInventory.addItem(name, qtyNumber, unit);
     if (location === "fridge") fridgeInventory.addItem(name, qtyNumber, unit);
     if (location === "freezer") freezerInventory.addItem(name, qtyNumber, unit);
     if (location === "chest") chestInventory.addItem(name, qtyNumber, unit);
 
+    // Clear the form inputs for the next entry
     form.reset();
 });
+
 
 // -------------------------------------------------------------
 // Clear ALL inventories at once
 // -------------------------------------------------------------
 document.getElementById("clear-all").addEventListener("click", function() {
-
     const isSure = confirm("Are you sure? This will wipe all the data.");
     if (!isSure) return;
-
     pantryInventory.clearAll();
     fridgeInventory.clearAll();
     freezerInventory.clearAll();
