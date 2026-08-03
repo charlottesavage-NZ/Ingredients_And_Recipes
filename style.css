@@ -143,3 +143,19 @@ input[type="number"] {
 .main-nav a:hover {
     background: rgba(255, 255, 255, 0.4);
 }
+
+
+.can-make {
+    color: #2f7a3e;
+    font-weight: bold;
+}
+
+.cannot-make {
+    color: #a33636;
+    font-weight: bold;
+    margin-top: 10px;
+}
+
+.missing-list {
+    margin-left: 20px;
+}

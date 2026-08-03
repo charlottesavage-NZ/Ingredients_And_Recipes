@@ -216,6 +216,52 @@ function readRecipes(callback) {
     });
 }
 
+// -------------------------------------------------------------
+// Reads all four inventory sections (pantry, fridge, freezer,
+// chest) and combines them into ONE list. This is needed because
+// a recipe doesn't care which section an ingredient lives in -
+// it just needs to know the total amount you have anywhere in
+// the house. Items with the same name+unit across different
+// sections get added together.
+// -------------------------------------------------------------
+function readAllInventory(callback) {
+    const sections = Object.keys(csvFiles);
+    let combined = [];
+    let completed = 0;
+    let hadError = false;
+
+    sections.forEach(section => {
+        fs.readFile(csvFiles[section], 'utf8', (err, data) => {
+            if (hadError) return;
+            if (err) {
+                hadError = true;
+                return callback(err, null);
+            }
+
+            combined = combined.concat(parseCSV(data));
+            completed++;
+
+            // Only combine everything once ALL four files have
+            // finished reading (they're async, so this stops us
+            // returning early with only some sections loaded).
+            if (completed === sections.length) {
+                const merged = {};
+
+                combined.forEach(item => {
+                    const key = item.name.toLowerCase() + '|' + item.unit;
+                    if (!merged[key]) {
+                        merged[key] = { name: item.name, unit: item.unit, quantity: 0 };
+                    }
+                    merged[key].quantity += Number(item.quantity);
+                });
+
+                callback(null, Object.values(merged));
+            }
+        });
+    });
+}
+
+
 const server = http.createServer((req, res) => {
 
     // Let the browser talk to this server from a file:// page.
@@ -449,6 +495,23 @@ const server = http.createServer((req, res) => {
         return;
     }
     
+// ---- Combined inventory across all four sections ----
+    // Used by the Recipes page to check "do we have enough of
+    // this ingredient anywhere in the house?"
+    if (req.url === '/inventory-all' && req.method === 'GET') {
+        readAllInventory((err, items) => {
+            if (err) {
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Could not read inventory');
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(items));
+        });
+        return;
+    }
+
+
     // req.url looks like "/pantry" - strip the leading slash to get
     // just the section name.
     const section = req.url.replace('/', '');

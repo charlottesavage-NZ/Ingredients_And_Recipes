@@ -1,8 +1,8 @@
 // -------------------------------------------------------------
 // This handles the Recipes page: adding, editing, and deleting
-// recipes (each with any number of ingredients), and displaying
-// all saved recipes. Talks to the same server.js as the inventory
-// page, but uses the /recipes route instead of /pantry, /fridge, etc.
+// recipes (each with any number of ingredients), displaying all
+// saved recipes, and checking each recipe against the combined
+// house inventory to show what's missing.
 // -------------------------------------------------------------
 
 const SERVER_URL = 'http://localhost:3000';
@@ -18,10 +18,77 @@ const saveButton = recipeForm.querySelector('button[type="submit"]');
 // null means "we're adding a brand new recipe", not editing one.
 let editingRecipeId = null;
 
-// Keeps a local copy of the last-loaded recipes, so when someone
-// clicks Edit we can look up that recipe's full data without
-// asking the server for it again.
+// Local copies of the last-loaded data, so we don't need to
+// re-fetch from the server every time something re-renders.
 let currentRecipes = [];
+let currentInventory = [];
+
+// -------------------------------------------------------------
+// Weight/volume conversion tables - same idea as script.js, but
+// duplicated here since this is a separate page with its own
+// script file. Used to convert a recipe's ingredient (which could
+// be typed in kg or L) into the SAME base unit the pantry stores
+// in (g or ml), so quantities can be fairly compared.
+// -------------------------------------------------------------
+const WEIGHT_UNITS_TO_GRAMS = { g: 1, kg: 1000 };
+const VOLUME_UNITS_TO_ML = { ml: 1, l: 1000 };
+
+function toBaseUnit(quantity, unit) {
+    if (unit in WEIGHT_UNITS_TO_GRAMS) {
+        return { quantity: quantity * WEIGHT_UNITS_TO_GRAMS[unit], unit: 'g' };
+    }
+    if (unit in VOLUME_UNITS_TO_ML) {
+        return { quantity: quantity * VOLUME_UNITS_TO_ML[unit], unit: 'ml' };
+    }
+    // "each" (or anything else) can't be converted - just pass through
+    return { quantity, unit };
+}
+
+// Converts a base-unit amount back into a friendly display format,
+// e.g. 200g stays "200 g", but 1500g becomes "1.5 kg".
+function formatQuantity(quantity, unit) {
+    if (unit === 'g' && quantity >= 1000) {
+        return { quantity: Math.round((quantity / 1000) * 100) / 100, unit: 'kg' };
+    }
+    if (unit === 'ml' && quantity >= 1000) {
+        return { quantity: Math.round((quantity / 1000) * 100) / 100, unit: 'L' };
+    }
+    return { quantity: Math.round(quantity * 100) / 100, unit };
+}
+
+// -------------------------------------------------------------
+// Compares one recipe's ingredients against the combined house
+// inventory. Returns whether you can make it, and a detailed list
+// of what's short and by how much.
+// -------------------------------------------------------------
+function checkRecipeAvailability(recipe, inventory) {
+    const missing = [];
+
+    recipe.ingredients.forEach(ing => {
+        const needed = toBaseUnit(Number(ing.quantity), ing.unit);
+
+        // Find a matching inventory item by name AND base unit -
+        // if the units don't match (e.g. recipe wants "each" but
+        // you only have it in grams), we can't compare them fairly,
+        // so it's treated the same as having zero.
+        const match = inventory.find(item =>
+            item.name.toLowerCase() === ing.ingredient_name.toLowerCase() &&
+            item.unit === needed.unit
+        );
+
+        const have = match ? Number(match.quantity) : 0;
+
+        if (have < needed.quantity) {
+            const shortfall = formatQuantity(needed.quantity - have, needed.unit);
+            missing.push(`${ing.ingredient_name} (need ${shortfall.quantity} more ${shortfall.unit})`);
+        }
+    });
+
+    return {
+        canMake: missing.length === 0,
+        missing: missing
+    };
+}
 
 // -------------------------------------------------------------
 // Adds one ingredient row to the form. Optionally pre-fills it
@@ -48,38 +115,38 @@ function addIngredientRow(existing = null) {
         </select>
     `;
 
-    // Set the dropdown to match the existing unit, since you can't
-    // do this through the HTML string above the way you can with
-    // a plain input's value.
     row.querySelector('.ingredient-unit').value = unit;
-
     ingredientRowsContainer.appendChild(row);
 }
 
-// Start with one empty ingredient row so the form isn't blank
 addIngredientRow();
-
-// Clicking "+ Add Ingredient" just adds another blank row
 document.getElementById('add-ingredient-btn').addEventListener('click', () => addIngredientRow());
 
 // -------------------------------------------------------------
-// Asks the server for all saved recipes and renders them.
+// Loads BOTH recipes and the combined inventory before rendering,
+// since each recipe card needs the inventory to check availability
+// against. Promise.all runs both fetches at the same time rather
+// than waiting for one to finish before starting the other.
 // -------------------------------------------------------------
-function loadRecipes() {
-    fetch(`${SERVER_URL}/recipes`)
-        .then(response => response.json())
-        .then(recipes => {
+function loadEverything() {
+    Promise.all([
+        fetch(`${SERVER_URL}/recipes`).then(r => r.json()),
+        fetch(`${SERVER_URL}/inventory-all`).then(r => r.json())
+    ])
+        .then(([recipes, inventory]) => {
             currentRecipes = recipes;
+            currentInventory = inventory;
             renderRecipes(recipes);
         })
         .catch(error => {
-            console.error('Could not load recipes from server:', error);
+            console.error('Could not load recipes/inventory from server:', error);
         });
 }
 
 // -------------------------------------------------------------
 // Builds the on-page list of recipes, each showing its name,
-// ingredients, instructions, and Edit/Delete buttons.
+// ingredients, instructions, an availability check, and
+// Edit/Delete buttons.
 // -------------------------------------------------------------
 function renderRecipes(recipes) {
     recipeList.innerHTML = "";
@@ -92,12 +159,21 @@ function renderRecipes(recipes) {
             .map(ing => `<li>${ing.ingredient_name} — ${ing.quantity} ${ing.unit}</li>`)
             .join('');
 
-        // data-id stores the recipe's id directly on each button, so
-        // when clicked we know exactly which recipe it refers to.
+        const availability = checkRecipeAvailability(recipe, currentInventory);
+
+        // Show a clear yes/no plus, if missing anything, a list of
+        // exactly what and how much more is needed.
+        const availabilityHTML = availability.canMake
+            ? `<p class="can-make">✅ You can make this!</p>`
+            : `<p class="cannot-make">❌ Missing:</p><ul class="missing-list">${
+                  availability.missing.map(m => `<li>${m}</li>`).join('')
+              }</ul>`;
+
         card.innerHTML = `
             <h3>${recipe.name}</h3>
             <ul>${ingredientsHTML}</ul>
             <p>${recipe.instructions}</p>
+            ${availabilityHTML}
             <button type="button" class="edit-recipe-btn" data-id="${recipe.id}">Edit</button>
             <button type="button" class="delete-recipe-btn" data-id="${recipe.id}">Delete</button>
         `;
@@ -106,8 +182,7 @@ function renderRecipes(recipes) {
     });
 }
 
-// Load existing recipes as soon as the page opens
-loadRecipes();
+loadEverything();
 
 // -------------------------------------------------------------
 // Fills the Add Recipe form with an existing recipe's data, and
@@ -119,16 +194,10 @@ function startEditingRecipe(recipe) {
     recipeNameInput.value = recipe.name;
     recipeInstructionsInput.value = recipe.instructions;
 
-    // Clear the current ingredient rows and rebuild them from
-    // this recipe's saved ingredients.
     ingredientRowsContainer.innerHTML = "";
     recipe.ingredients.forEach(ing => addIngredientRow(ing));
 
-    // Relabel the button so it's clear you're updating, not adding
     saveButton.textContent = "Update Recipe";
-
-    // Scroll up so the now-filled form is visible, since it might
-    // be off-screen if you clicked Edit further down the page.
     recipeForm.scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -176,8 +245,6 @@ recipeForm.addEventListener('submit', function(event) {
         return;
     }
 
-    // Decide whether we're creating a new recipe or updating one,
-    // based on whether editingRecipeId was set by clicking Edit.
     const url = editingRecipeId
         ? `${SERVER_URL}/recipes/${editingRecipeId}`
         : `${SERVER_URL}/recipes`;
@@ -191,7 +258,7 @@ recipeForm.addEventListener('submit', function(event) {
         .then(response => response.json())
         .then(() => {
             resetForm();
-            loadRecipes();
+            loadEverything();
         })
         .catch(error => {
             console.error('Could not save recipe:', error);
@@ -199,11 +266,11 @@ recipeForm.addEventListener('submit', function(event) {
 });
 
 // -------------------------------------------------------------
-// Handles clicking any "Edit" or "Delete" button on a recipe
-// card. We listen on the whole list (event delegation) rather
-// than on each button individually, because the buttons are
-// created dynamically by renderRecipes() and don't exist yet
-// when this code first runs.
+// Handles clicking any "Edit" or "Delete" button on a recipe card.
+// We listen on the whole list (event delegation) rather than on
+// each button individually, because the buttons are created
+// dynamically by renderRecipes() and don't exist yet when this
+// code first runs.
 // -------------------------------------------------------------
 recipeList.addEventListener('click', function(event) {
 
@@ -222,11 +289,8 @@ recipeList.addEventListener('click', function(event) {
         fetch(`${SERVER_URL}/recipes/${recipeId}`, { method: 'DELETE' })
             .then(response => response.json())
             .then(() => {
-                // If you were editing the recipe you just deleted,
-                // reset the form so it doesn't try to "update"
-                // something that no longer exists.
                 if (editingRecipeId === recipeId) resetForm();
-                loadRecipes();
+                loadEverything();
             })
             .catch(error => {
                 console.error('Could not delete recipe:', error);
