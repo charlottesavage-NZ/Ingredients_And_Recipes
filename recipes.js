@@ -1,8 +1,9 @@
 // -------------------------------------------------------------
 // This handles the Recipes page: adding, editing, and deleting
 // recipes (each with any number of ingredients), displaying all
-// saved recipes, and checking each recipe against the combined
-// house inventory to show what's missing.
+// saved recipes, checking each recipe against the combined house
+// inventory to show what's missing, and letting household members
+// vote like/dislike on each recipe.
 // -------------------------------------------------------------
 
 const SERVER_URL = 'http://localhost:3000';
@@ -22,6 +23,19 @@ let editingRecipeId = null;
 // re-fetch from the server every time something re-renders.
 let currentRecipes = [];
 let currentInventory = [];
+
+// Who's currently selected in the "Who's voting?" dropdown.
+// Empty string means nobody's picked yet.
+let currentPerson = '';
+
+// The full list of household members, loaded from the server.
+// Needed so we can show ALL of them on every recipe card, even
+// the ones who haven't voted on that recipe yet.
+let currentHouseholdMembers = [];
+
+// Prevents the dropdown being rebuilt (and losing your selection)
+// every time loadEverything() runs again after a vote.
+let personDropdownPopulated = false;
 
 // -------------------------------------------------------------
 // Weight/volume conversion tables - same idea as script.js, but
@@ -112,6 +126,30 @@ function loadItemNameSuggestions() {
 loadItemNameSuggestions();
 
 // -------------------------------------------------------------
+// Fills the "Who's voting?" dropdown with the household members
+// from the server. Only runs once (personDropdownPopulated guards
+// against it), so re-loading data after a vote doesn't wipe out
+// whichever name you currently have selected.
+// -------------------------------------------------------------
+function populatePersonDropdown(people) {
+    if (personDropdownPopulated) return;
+
+    const select = document.getElementById('person-select');
+    people.forEach(person => {
+        const option = document.createElement('option');
+        option.value = person;
+        option.textContent = person;
+        select.appendChild(option);
+    });
+
+    personDropdownPopulated = true;
+}
+
+document.getElementById('person-select').addEventListener('change', function(event) {
+    currentPerson = event.target.value;
+});
+
+// -------------------------------------------------------------
 // Adds one ingredient row to the form. Optionally pre-fills it
 // with existing values - used both for a blank new row, and for
 // filling in a recipe's existing ingredients when editing.
@@ -132,6 +170,8 @@ function addIngredientRow(existing = null) {
             <option value="kg">kilograms (kg)</option>
             <option value="ml">millilitres (mL)</option>
             <option value="l">litres (L)</option>
+            <option value="tsp">Teaspoons (tsp)</option>
+            <option value="tbsp">Tablespoons (tbsp)</option>
             <option value="each">each</option>
         </select>
     `;
@@ -151,29 +191,55 @@ addIngredientRow();
 document.getElementById('add-ingredient-btn').addEventListener('click', () => addIngredientRow());
 
 // -------------------------------------------------------------
-// Loads BOTH recipes and the combined inventory before rendering,
-// since each recipe card needs the inventory to check availability
-// against. Promise.all runs both fetches at the same time rather
-// than waiting for one to finish before starting the other.
+// Loads recipes, the combined inventory, AND the household member
+// list before rendering, since each recipe card needs all three.
+// Promise.all runs all three fetches at the same time rather than
+// waiting for one to finish before starting the next.
 // -------------------------------------------------------------
 function loadEverything() {
     Promise.all([
         fetch(`${SERVER_URL}/recipes`).then(r => r.json()),
-        fetch(`${SERVER_URL}/inventory-all`).then(r => r.json())
+        fetch(`${SERVER_URL}/inventory-all`).then(r => r.json()),
+        fetch(`${SERVER_URL}/household-members`).then(r => r.json())
     ])
-        .then(([recipes, inventory]) => {
+        .then(([recipes, inventory, people]) => {
             currentRecipes = recipes;
             currentInventory = inventory;
+            currentHouseholdMembers = people;
+            populatePersonDropdown(people);
             renderRecipes(recipes);
         })
         .catch(error => {
-            console.error('Could not load recipes/inventory from server:', error);
+            console.error('Could not load recipes/inventory/household members from server:', error);
         });
 }
 
 // -------------------------------------------------------------
+// Builds the HTML for one recipe's voting section: every household
+// member's current vote (or "no vote" if they haven't), plus
+// Like/Dislike buttons to cast or change your own vote.
+// -------------------------------------------------------------
+function renderVotes(recipe) {
+    const voteEmojis = { like: '👍', dislike: '👎' };
+
+    const voteListHTML = currentHouseholdMembers.map(person => {
+        const personVote = recipe.votes.find(v => v.person === person);
+        const display = personVote ? voteEmojis[personVote.vote] : 'no vote';
+        return `<li>${person}: ${display}</li>`;
+    }).join('');
+
+    return `
+        <div class="vote-section">
+            <ul class="vote-list">${voteListHTML}</ul>
+            <button type="button" class="vote-btn" data-id="${recipe.id}" data-vote="like">👍 Like</button>
+            <button type="button" class="vote-btn" data-id="${recipe.id}" data-vote="dislike">👎 Dislike</button>
+        </div>
+    `;
+}
+
+// -------------------------------------------------------------
 // Builds the on-page list of recipes, each showing its name,
-// ingredients, instructions, an availability check, and
+// ingredients, instructions, an availability check, votes, and
 // Edit/Delete buttons.
 // -------------------------------------------------------------
 function renderRecipes(recipes) {
@@ -205,6 +271,7 @@ function renderRecipes(recipes) {
             <ul>${ingredientsHTML}</ul>
             <p>${recipe.instructions}</p>
             ${availabilityHTML}
+            ${renderVotes(recipe)}
             <button type="button" class="edit-recipe-btn" data-id="${recipe.id}">Edit</button>
             <button type="button" class="delete-recipe-btn" data-id="${recipe.id}">Delete</button>
         `;
@@ -213,7 +280,8 @@ function renderRecipes(recipes) {
     });
 }
 
-// Load existing recipes (and inventory) as soon as the page opens
+// Load existing recipes (and inventory, and household members) as
+// soon as the page opens
 loadEverything();
 
 // -------------------------------------------------------------
@@ -309,13 +377,37 @@ recipeForm.addEventListener('submit', function(event) {
 });
 
 // -------------------------------------------------------------
-// Handles clicking any "Edit" or "Delete" button on a recipe
+// Handles clicking any Vote, Edit, or Delete button on a recipe
 // card. We listen on the whole list (event delegation) rather
 // than on each button individually, because the buttons are
 // created dynamically by renderRecipes() and don't exist yet
 // when this code first runs.
 // -------------------------------------------------------------
 recipeList.addEventListener('click', function(event) {
+
+    if (event.target.classList.contains('vote-btn')) {
+        if (!currentPerson) {
+            alert("Please select who you are from the dropdown before voting.");
+            return;
+        }
+
+        const recipeId = event.target.dataset.id;
+        const vote = event.target.dataset.vote;
+
+        fetch(`${SERVER_URL}/recipes/${recipeId}/votes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ person: currentPerson, vote })
+        })
+            .then(response => response.json())
+            .then(() => {
+                loadEverything();
+            })
+            .catch(error => {
+                console.error('Could not save vote:', error);
+            });
+        return;
+    }
 
     if (event.target.classList.contains('edit-recipe-btn')) {
         const recipeId = event.target.dataset.id;

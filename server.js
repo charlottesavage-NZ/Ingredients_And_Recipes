@@ -32,6 +32,9 @@ const csvFiles = {
 // -------------------------------------------------------------
 const RECIPES_FILE = 'recipes.csv';
 const RECIPE_INGREDIENTS_FILE = 'recipe_ingredients.csv';
+const RECIPE_VOTES_FILE = 'recipe_votes.csv';
+
+const HOUSEHOLD_MEMBERS = ['Charlotte', 'Todd', 'Kayleigh'];
 
 // -------------------------------------------------------------
 // A curated baseline of common grocery items with CORRECT
@@ -222,16 +225,23 @@ function readRecipes(callback) {
         fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
             if (err) return callback(err, null);
 
-            const recipes = parseCSV(recipesData);
-            const ingredients = parseCSV(ingredientsData);
+            fs.readFile(RECIPE_VOTES_FILE, 'utf8', (err, votesData) => {
+                if (err) return callback(err, null);
 
-            // Attach each recipe's own ingredients by matching recipe_id
-            const recipesWithIngredients = recipes.map(recipe => ({
-                ...recipe,
-                ingredients: ingredients.filter(ing => ing.recipe_id === recipe.id)
-            }));
+                const recipes = parseCSV(recipesData);
+                const ingredients = parseCSV(ingredientsData);
+                const votes = parseCSV(votesData);
 
-            callback(null, recipesWithIngredients);
+                // Attach each recipe's own ingredients AND votes by
+                // matching recipe_id, same pattern as before.
+                const recipesWithExtras = recipes.map(recipe => ({
+                    ...recipe,
+                    ingredients: ingredients.filter(ing => ing.recipe_id === recipe.id),
+                    votes: votes.filter(v => v.recipe_id === recipe.id)
+                }));
+
+                callback(null, recipesWithExtras);
+            });
         });
     });
 }
@@ -342,6 +352,7 @@ const server = http.createServer((req, res) => {
     if (req.url === '/recipes' && req.method === 'GET') {
         readRecipes((err, recipes) => {
             if (err) {
+                console.error('Error reading recipes:', err);
                 res.writeHead(500, { 'Content-Type': 'text/plain' });
                 res.end('Could not read recipes');
                 return;
@@ -553,6 +564,57 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+
+    // ---- List the household members who can vote ----
+    if (req.url === '/household-members' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(HOUSEHOLD_MEMBERS));
+        return;
+    }
+
+    // ---- Cast (or change) a vote on a recipe ----
+    // URL looks like /recipes/1234567890/votes
+    if (req.url.match(/^\/recipes\/[^/]+\/votes$/) && req.method === 'POST') {
+        const recipeId = req.url.split('/')[2];
+
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            const { person, vote } = JSON.parse(body);
+
+            fs.readFile(RECIPE_VOTES_FILE, 'utf8', (err, votesData) => {
+                if (err) {
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Could not read recipe votes');
+                    return;
+                }
+
+                const votes = parseCSV(votesData);
+
+                // If this person already voted on this recipe, update
+                // their existing vote rather than adding a duplicate row.
+                const existingVote = votes.find(v => v.recipe_id === recipeId && v.person === person);
+
+                if (existingVote) {
+                    existingVote.vote = vote;
+                } else {
+                    votes.push({ recipe_id: recipeId, person, vote });
+                }
+
+                fs.writeFile(RECIPE_VOTES_FILE, stringifyGenericCSV(['recipe_id', 'person', 'vote'], votes), 'utf8', (err) => {
+                    if (err) {
+                        res.writeHead(500, { 'Content-Type': 'text/plain' });
+                        res.end('Could not save recipe votes');
+                        return;
+                    }
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ recipe_id: recipeId, person, vote }));
+                });
+            });
+        });
+        return;
+    }
+    
     // ---- Combined inventory across all four sections ----
     // Used by the Recipes page to check "do we have enough of
     // this ingredient anywhere in the house?"

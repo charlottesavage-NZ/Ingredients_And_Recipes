@@ -159,3 +159,12 @@ input[type="number"] {
 .missing-list {
     margin-left: 20px;
 }
+
+.vote-section {
+    margin-top: 10px;
+}
+
+.vote-list {
+    margin-left: 20px;
+    margin-bottom: 8px;
+}
