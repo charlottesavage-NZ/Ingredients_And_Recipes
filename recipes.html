@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recipes</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+
+        <header class="header">
+            <h1>Recipes</h1>
+            <nav class="main-nav">
+                <a href="index.html">Inventory</a>
+                <a href="recipes.html">Recipes</a>
+            </nav>
+        </header>
+
+        <main>
+
+            <!-- ===================== ADD A RECIPE ===================== -->
+            <section id="add-recipe-section" class="inventory-section">
+                <h2>Add a Recipe</h2>
+
+                <form id="recipe-form">
+                    <input type="text" id="recipe-name" placeholder="Recipe Name" required>
+                    <textarea id="recipe-instructions" placeholder="Instructions" rows="4" required></textarea>
+
+                    <!-- This is where ingredient rows get added dynamically
+                         by recipes.js. It starts empty and JavaScript fills
+                         it in as the "Add Ingredient" button is clicked. -->
+                    <div id="ingredient-rows"></div>
+
+                    <button type="button" id="add-ingredient-btn">+ Add Ingredient</button>
+                    <button type="submit">Save Recipe</button>
+                </form>
+            </section>
+
+            <!-- ===================== RECIPE LIST ===================== -->
+            <section id="recipe-list-section" class="inventory-section">
+                <h2>Saved Recipes</h2>
+                <div id="recipe-list"></div>
+            </section>
+
+        </main>
+    </div>
+
+    <script src="recipes.js"></script>
+</body>
+</html>

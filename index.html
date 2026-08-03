@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- this title is for the top of the tab, not the text that shows on the page. -->
+    <title>What Food do we have?</title>
+
+    <!-- This is what loads the CSS from style.css so I can make things look nice -->
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- The container is an optional wrapper used to center your content and apply layout styling (padding, max-width, background, etc.)
+         If you remove this div, your content will stretch full-width. -->
+    <div class="container">
+
+        <!-- This is the header section, which contains the main title that you see on the page.
+             The class "header" lets you style this section in CSS. -->
+        <header class="header">
+            <!-- H1 here is to specify if we want to do .header h1 in css later, to modify just this header e.g font size -->
+            <h1>What Food do we have?</h1>
+                
+            <nav class="main-nav">
+                <a href="index.html">Inventory</a>
+                <a href="recipes.html">Recipes</a>
+            </nav>
+        </header>
+
+        <main>
+
+            <!-- This section groups everything related to adding a new item into the house inventory.
+                 The id "house-section" allows you to style it or target it in javascript. -->
+            <section id="house-section" class="inventory-section">
+
+                <!-- h2 below is to specify if we want to do #house-section h2 in css later, to modify just this header e.g font size -->
+                <h2>What's in the House?</h2>
+
+                <!-- This is creating a form to collect user input. The id "house-form" lets your JavaScript attach an event listener to handle the user submissions. -->
+                <form id="house-form">
+
+                    <!-- This is adding two input types, for Item Name and Quantity.
+                         using "required" prevents the form from submitting empty. Using type="number" ensures only numeric input is allowed. -->
+                    <input type="text" id="item-name" placeholder="Item Name" required>
+                    <input type="number" id="item-quantity" placeholder="Quantity" required>
+
+                    <!-- This dropdown lets me choose the unit of measure for the item (grams, kg, each etc). -->
+                    <select id="item-unit" required>
+                        <!-- doing option value = "" here is where you can select the dropdowns and alter them -->
+                        <option value="kg">kilograms (kg)</option>
+                        <option value="g">grams (g)</option>
+                        <option value="ml">milliliters (mL)</option>
+                        <option value="l">liters (L)</option>
+                        <option value="each">each</option>
+                    </select>
+
+                    <!-- This dropdown lets me choose where the item is stored in the house.
+                         JavaScript will use this value to save the item into the correct inventory list. -->
+                    <select id="item-location" required>
+                        <option value="pantry">Pantry</option>
+                        <option value="fridge">Fridge</option>
+                        <option value="freezer">Freezer (Inside)</option>
+                        <option value="chest">Chest Freezer</option>
+                    </select>
+
+                    <!-- By clicking the button, JavaScript will intercept this and add the item to the correct list instead of refreshing the page. -->
+                    <button type="submit">Add Item</button>
+                </form>
+
+                <!-- Clear button sits below the form. This clears ALL items in ALL storage areas. -->
+                <button id="clear-all" type="button">Clear Entire House Inventory</button>
+
+            </section>
+
+            <!-- ===================== PANTRY LIST ===================== -->
+            <!-- This section displays the list of pantry items. The id "pantry-list" lets you style or target it in JS. -->
+            <section id="pantry-section" class="inventory-section">
+                <h3>Pantry Items</h3>
+                <!-- <ul> is an unordered list. The id "pantry-list" is important: your JavaScript will dynamically insert <li> elements here for each item added. -->
+                <ul id="pantry-list"></ul>
+            </section>
+
+            <!-- ===================== FRIDGE LIST ===================== -->
+            <section id="fridge-section" class="inventory-section">
+                <h3>Fridge Items</h3>
+                <ul id="fridge-list"></ul>
+            </section>
+
+            <!-- ===================== FREEZER LIST ===================== -->
+            <section id="freezer-section" class="inventory-section">
+                <h3>Freezer (Inside) Items</h3>
+                <ul id="freezer-list"></ul>
+            </section>
+
+            <!-- ===================== CHEST FREEZER LIST ===================== -->
+            <section id="chest-section" class="inventory-section">
+                <h3>Chest Freezer Items</h3>
+                <ul id="chest-list"></ul>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- This loads your JavaScript file. It should always be placed at the bottom of <body> -->
+    <script src="script.js"></script>
+</body>
+</html>

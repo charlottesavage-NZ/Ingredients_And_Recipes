@@ -1,0 +1,145 @@
+/* This resets default browser spacing and ensures consistent layout behaviour.
+   Without this, browsers add their own margins/padding which makes layouts unpredictable. */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    /* To change the fonts available, alter font-family here */
+    font-family: Georgia, serif;
+
+    /* This is the background gradient, the start, middle and stop colours.
+       It covers the entire page because body has min-height: 100vh. */
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+    min-height: 100vh; /* ensures the gradient fills the screen */
+    padding: 20px;
+
+    /* This one alters the colour of the body words in the page */
+    color: black;
+}
+
+/* The container is an optional wrapper used to center your content and apply layout styling.
+   IMPORTANT: We set background: transparent so it does NOT block the gradient behind it. */
+.container {
+    max-width: 900px;   /* limits how wide the content can get */
+    margin: 0 auto;     /* centers the content */
+    background: transparent; /* prevents white background from covering the gradient */
+}
+
+/* This is for the main header at the top of the page.
+   The class "header" lets you style this section in CSS. */
+.header {
+    color: black;
+    padding: 30px;
+    text-align: center;
+    font-size: 2.5em;
+    margin-bottom: 10px;
+
+    /* Optional shadow to make the header stand out on the gradient */
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+}
+
+/* This controls the main layout area where all sections appear.
+   We stack everything vertically because we now have one input box and four lists. */
+main {
+    display: flex;         /* stacks children vertically */
+    flex-direction: column;
+    gap: 30px;             /* spacing between sections */
+}
+
+/* Inventory section styling.
+   This is the frosted-glass effect box that sits on top of the gradient.
+   backdrop-filter only works if the background is transparent behind it,
+   which is why .container must be transparent. */
+.inventory-section {
+    background: rgba(255, 255, 255, 0.25); /* semi-transparent white box */
+    backdrop-filter: blur(12px);           /* frosted glass effect */
+    -webkit-backdrop-filter: blur(12px);   /* Safari support */
+    border-radius: 12px;                   /* rounded corners */
+    padding: 20px;                         /* internal spacing */
+    border: 1px solid rgba(255, 255, 255, 0.4); /* subtle border to define the box */
+}
+
+/* Section headers (e.g. "What's in the House?") */
+.inventory-section h2 {
+    margin-bottom: 10px;
+}
+
+/* Sub-headers for item lists (e.g. "Pantry Items") */
+.inventory-section h3 {
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+
+/* Form layout inside the main input section.
+   This keeps all input boxes stacked neatly with spacing between them. */
+.inventory-section form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px; /* space between input boxes and the button */
+}
+
+/* Styling for both submit and clear buttons */
+button[type="button"],
+button[type="submit"] {
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 6px;
+    border: none;
+    background: #4c51bf; /* a nice purple-blue button colour */
+    color: white;
+    cursor: pointer;
+    font-size: 1em;
+}
+
+/* Optional: button hover effect */
+button:hover {
+    background: #434190; /* slightly darker shade */
+}
+
+/* Optional: style the dropdowns so they look nicer */
+select {
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 1em;
+}
+
+/* Optional: style the input boxes */
+input[type="text"],
+input[type="number"] {
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    font-size: 1em;
+}
+
+
+/* Simple nav bar under the main heading. Links sit side by side
+   with a bit of spacing, and lose the default blue/underline look
+   so they match the rest of the page's style. */
+.main-nav {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-top: 10px;
+}
+
+.main-nav a {
+    color: black;
+    text-decoration: none;
+    font-size: 1.1em;
+    padding: 8px 16px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.25);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.main-nav a:hover {
+    background: rgba(255, 255, 255, 0.4);
+}
