@@ -149,19 +149,25 @@ input[type="number"] {
     list-style: none;
 }
 
-/* Rows in the Price Checker's live search results and saved price
-   history - keeps the item text and Save button lined up neatly. */
-.price-result-row,
-.price-history-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 0;
+/* The live search results AND saved price history tables on the
+   Price Checker page share this same styling. */
+.price-results-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+.price-results-table th,
+.price-results-table td {
+    text-align: left;
+    padding: 8px 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.3);
 }
 
-.price-result-row button {
+.price-results-table th {
+    font-weight: bold;
+}
+
+.price-results-table button {
     margin-top: 0;
-    flex-shrink: 0;
 }

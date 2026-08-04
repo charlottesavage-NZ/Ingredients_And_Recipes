@@ -47,16 +47,35 @@ const PRICES_FILE = 'prices.csv';
 const PRICE_HEADERS = ['id', 'item_name', 'price', 'cup_price', 'cup_measure', 'store', 'date_checked'];
 
 // -------------------------------------------------------------
-// Which physical Woolworths store to price everything from. A
+// Which physical Woolworths store(s) to price things from. A
 // fresh, brand-new browser (which is what Playwright uses every
 // time) has no idea which store you want, so without this it
-// silently defaults to some other store entirely (Glenfield, for
-// us). Found via Firefox DevTools -> Storage -> Cookies while
-// browsing woolworths.co.nz normally with "Woolworths Moorhouse
-// Ave" selected as the pickup store. If we ever change stores,
-// this is the value that needs updating the same way.
+// silently defaults to some other store entirely.
+//
+// To add another store: on woolworths.co.nz, use their normal
+// "Change store" option to switch to it, then Firefox DevTools ->
+// Storage -> Cookies -> find "cw-lrkswrdjp" and copy its value in
+// here under whatever name you want it labelled with on the page.
 // -------------------------------------------------------------
-const WOOLWORTHS_STORE_COOKIE = 'dm-Pickup,f-9169,a-495,s-10235';
+const WOOLWORTHS_STORES = {
+    'Woolworths Moorhouse': 'dm-Pickup,f-9169,a-495,s-10235',
+    'Woolworths Northlands': 'dm-Pickup,f-9540,a-480,s-38',
+    'Woolworths Ferrymead': 'dm-Pickup,f-9576,a-726,s-10410'
+};
+
+// Whichever store gets used if none is specifically chosen.
+const DEFAULT_WOOLWORTHS_STORE = 'Woolworths Moorhouse';
+
+// -------------------------------------------------------------
+// Not built yet - Pak'nSave will need its own scraper function
+// entirely (different site, different API, different cookies),
+// but keeping an empty list here means the store DROPDOWN on the
+// page is already future-proofed: one combined list for the
+// person using the app, even though the code behind it will stay
+// split by retailer. See the /stores and /price-search routes
+// below for how the two lists get combined and routed.
+// -------------------------------------------------------------
+const PAKNSAVE_STORES = {};
 
 // -------------------------------------------------------------
 // A curated baseline of common grocery items with CORRECT
@@ -361,7 +380,12 @@ function getAllItemNames(callback) {
 // browser window pops up on the server - unlike our test script,
 // nobody's watching this one run.
 // -------------------------------------------------------------
-async function searchWoolworths(searchTerm) {
+async function searchWoolworths(searchTerm, storeName) {
+    // Fall back to the default store if none was given, or if
+    // someone passes a name that isn't in our list.
+    const chosenStore = WOOLWORTHS_STORES[storeName] ? storeName : DEFAULT_WOOLWORTHS_STORE;
+    const storeCookie = WOOLWORTHS_STORES[chosenStore];
+
     // TEMPORARY: switched to false to test a theory - headless
     // (invisible) browsers sometimes get detected and blocked by
     // sites with serious bot protection, even when the exact same
@@ -372,11 +396,11 @@ async function searchWoolworths(searchTerm) {
 
     // Set the store cookie BEFORE the browser ever visits the site,
     // so it behaves like a returning visitor who already picked
-    // Moorhouse - same trick we worked out in the Python version.
+    // this specific store - same trick we worked out originally.
     await context.addCookies([
         {
             name: 'cw-lrkswrdjp',
-            value: WOOLWORTHS_STORE_COOKIE,
+            value: storeCookie,
             domain: 'www.woolworths.co.nz',
             path: '/'
         }
@@ -464,11 +488,26 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // ---- PRICE CHECKER: live search against Woolworths NZ ----
+    // ---- Combined store list for the dropdown - one list on the ----
+    // ---- page, even though Woolworths and Pak'nSave are handled ----
+    // ---- completely separately behind the scenes. ----
+    if (parsedUrl.pathname === '/stores' && req.method === 'GET') {
+        const allStoreNames = [
+            ...Object.keys(WOOLWORTHS_STORES),
+            ...Object.keys(PAKNSAVE_STORES)
+        ];
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(allStoreNames));
+        return;
+    }
+
+    // ---- PRICE CHECKER: live search, routed to whichever ----
+    // ---- retailer the chosen store actually belongs to ----
     // Has to be checked BEFORE the pantry/fridge/freezer/chest
     // routing below, same reasoning as the recipes routes.
     if (parsedUrl.pathname === '/price-search' && req.method === 'GET') {
         const searchTerm = parsedUrl.searchParams.get('item');
+        const storeName = parsedUrl.searchParams.get('store');
 
         if (!searchTerm) {
             res.writeHead(400, { 'Content-Type': 'text/plain' });
@@ -476,7 +515,14 @@ const server = http.createServer((req, res) => {
             return;
         }
 
-        searchWoolworths(searchTerm)
+        // The dropdown is one combined list, but each store name
+        // still tells us which retailer's scraper to actually run.
+        const isPakNSaveStore = Object.prototype.hasOwnProperty.call(PAKNSAVE_STORES, storeName);
+        const searchPromise = isPakNSaveStore
+            ? Promise.reject(new Error("Pak'nSave isn't built yet"))
+            : searchWoolworths(searchTerm, storeName);
+
+        searchPromise
             .then(results => {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(results));

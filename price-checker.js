@@ -26,6 +26,29 @@ function loadItemNameSuggestions() {
 
 loadItemNameSuggestions();
 
+// -------------------------------------------------------------
+// Fills the store dropdown with every store the server knows
+// about, across every retailer (see WOOLWORTHS_STORES and
+// PAKNSAVE_STORES in server.js) - one combined list here, even
+// though each retailer is handled completely separately behind
+// the scenes. Runs once when the page loads.
+// -------------------------------------------------------------
+function loadStoreOptions() {
+    fetch(`${SERVER_URL}/stores`)
+        .then(response => response.json())
+        .then(storeNames => {
+            const select = document.getElementById('store-select');
+            select.innerHTML = storeNames
+                .map(name => `<option value="${name}">${name}</option>`)
+                .join('');
+        })
+        .catch(error => {
+            console.error('Could not load store list:', error);
+        });
+}
+
+loadStoreOptions();
+
 const searchInput = document.getElementById('price-search-input');
 const searchBtn = document.getElementById('price-search-btn');
 const resultsContainer = document.getElementById('price-search-results');
@@ -37,6 +60,7 @@ const historyContainer = document.getElementById('price-history-list');
 // -------------------------------------------------------------
 searchBtn.addEventListener('click', function() {
     const searchTerm = searchInput.value.trim();
+    const storeName = document.getElementById('store-select').value;
 
     if (!searchTerm) {
         alert("Type something to search for first.");
@@ -48,7 +72,7 @@ searchBtn.addEventListener('click', function() {
     // so it's clear it's working, not stuck.
     resultsContainer.innerHTML = "<p>Searching Woolworths...</p>";
 
-    fetch(`${SERVER_URL}/price-search?item=${encodeURIComponent(searchTerm)}`)
+    fetch(`${SERVER_URL}/price-search?item=${encodeURIComponent(searchTerm)}&store=${encodeURIComponent(storeName)}`)
         .then(response => {
             if (!response.ok) throw new Error('Search failed');
             return response.json();
@@ -61,7 +85,8 @@ searchBtn.addEventListener('click', function() {
 });
 
 // -------------------------------------------------------------
-// Shows every matching product as its own row with a Save button.
+// Shows every matching product as a table row, with its own Save
+// button in the last column.
 // -------------------------------------------------------------
 function renderResults(results) {
     resultsContainer.innerHTML = "";
@@ -71,29 +96,63 @@ function renderResults(results) {
         return;
     }
 
+    const table = document.createElement('table');
+    table.classList.add('price-results-table');
+
+    // Header row - labelled "Unit Price" rather than "Price per Kg",
+    // since Woolworths doesn't always calculate it in kilograms (a
+    // small jar of minced garlic, for example, shows a price per
+    // 10g instead) - this shows exactly what they calculated rather
+    // than mislabelling it.
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+        <tr>
+            <th>Item</th>
+            <th>Price</th>
+            <th>Unit Price</th>
+            <th></th>
+        </tr>
+    `;
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+
     results.forEach(result => {
-        const row = document.createElement('div');
-        row.classList.add('price-result-row');
+        const row = document.createElement('tr');
 
-        // Some products (ones priced "per each" rather than "per
-        // kg") don't have a cup price at all - only show that part
-        // when it actually exists.
-        const cupInfo = result.cupMeasure
-            ? ` ($${result.cupPrice} per ${result.cupMeasure})`
-            : "";
-
-        const label = document.createElement('span');
-        label.textContent = `${result.name} - $${result.price}${cupInfo} - ${result.store}`;
+        // Some products (priced "per each" rather than by weight)
+        // don't have a unit price at all - show a dash rather than
+        // leaving the cell blank or saying "null".
+        const unitPriceText = result.cupMeasure
+            ? `$${result.cupPrice} / ${result.cupMeasure}`
+            : "—";
 
         const saveBtn = document.createElement('button');
         saveBtn.type = 'button';
         saveBtn.textContent = 'Save';
         saveBtn.addEventListener('click', () => savePrice(result));
 
-        row.appendChild(label);
-        row.appendChild(saveBtn);
-        resultsContainer.appendChild(row);
+        const nameCell = document.createElement('td');
+        nameCell.textContent = result.name;
+
+        const priceCell = document.createElement('td');
+        priceCell.textContent = `$${result.price}`;
+
+        const unitPriceCell = document.createElement('td');
+        unitPriceCell.textContent = unitPriceText;
+
+        const saveCell = document.createElement('td');
+        saveCell.appendChild(saveBtn);
+
+        row.appendChild(nameCell);
+        row.appendChild(priceCell);
+        row.appendChild(unitPriceCell);
+        row.appendChild(saveCell);
+        tbody.appendChild(row);
     });
+
+    table.appendChild(tbody);
+    resultsContainer.appendChild(table);
 }
 
 // -------------------------------------------------------------
@@ -125,7 +184,7 @@ function savePrice(result) {
 
 // -------------------------------------------------------------
 // Loads and displays every price you've ever saved, most recently
-// checked first.
+// checked first, as a table matching the search results above.
 // -------------------------------------------------------------
 function loadPriceHistory() {
     fetch(`${SERVER_URL}/prices`)
@@ -142,18 +201,58 @@ function loadPriceHistory() {
             // the most recently saved entries at the top.
             const sorted = [...prices].sort((a, b) => Number(b.id) - Number(a.id));
 
+            // Reuses the same "price-results-table" styling as the
+            // live search results, so both tables look consistent.
+            const table = document.createElement('table');
+            table.classList.add('price-results-table');
+
+            const thead = document.createElement('thead');
+            thead.innerHTML = `
+                <tr>
+                    <th>Item</th>
+                    <th>Price</th>
+                    <th>Unit Price</th>
+                    <th>Store</th>
+                    <th>Checked</th>
+                </tr>
+            `;
+            table.appendChild(thead);
+
+            const tbody = document.createElement('tbody');
+
             sorted.forEach(entry => {
-                const row = document.createElement('div');
-                row.classList.add('price-history-row');
+                const row = document.createElement('tr');
 
+                const unitPriceText = entry.cup_measure
+                    ? `$${entry.cup_price} / ${entry.cup_measure}`
+                    : "—";
                 const checkedDate = new Date(entry.date_checked).toLocaleDateString();
-                const cupInfo = entry.cup_measure
-                    ? ` ($${entry.cup_price} per ${entry.cup_measure})`
-                    : "";
 
-                row.textContent = `${entry.item_name} - $${entry.price}${cupInfo} - ${entry.store} - checked ${checkedDate}`;
-                historyContainer.appendChild(row);
+                const nameCell = document.createElement('td');
+                nameCell.textContent = entry.item_name;
+
+                const priceCell = document.createElement('td');
+                priceCell.textContent = `$${entry.price}`;
+
+                const unitPriceCell = document.createElement('td');
+                unitPriceCell.textContent = unitPriceText;
+
+                const storeCell = document.createElement('td');
+                storeCell.textContent = entry.store;
+
+                const dateCell = document.createElement('td');
+                dateCell.textContent = checkedDate;
+
+                row.appendChild(nameCell);
+                row.appendChild(priceCell);
+                row.appendChild(unitPriceCell);
+                row.appendChild(storeCell);
+                row.appendChild(dateCell);
+                tbody.appendChild(row);
             });
+
+            table.appendChild(tbody);
+            historyContainer.appendChild(table);
         })
         .catch(error => {
             console.error('Could not load price history:', error);

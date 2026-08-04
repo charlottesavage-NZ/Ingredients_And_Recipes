@@ -23,10 +23,15 @@
             <!-- ===================== SEARCH WOOLWORTHS ===================== -->
             <section id="price-search-section" class="inventory-section">
                 <h2>Check a Price</h2>
-                <p>Searches Woolworths NZ live and shows every matching product. Click "Save" on any result you want to keep in your price history.</p>
+                <p>Check a price below - searches your selected store live and shows every matching product. Click "Save" on any result you want to keep in your price history.</p>
 
                 <div id="price-search-form">
                     <input type="text" id="price-search-input" placeholder="e.g. Mince" list="item-names-list">
+
+                    <!-- Filled in by price-checker.js from the
+                         server's list of known stores. -->
+                    <select id="store-select"></select>
+
                     <button type="button" id="price-search-btn">Search</button>
                 </div>
 
