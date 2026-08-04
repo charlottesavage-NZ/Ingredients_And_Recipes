@@ -7,6 +7,7 @@
 
 const http = require('http');
 const fs = require('fs');
+const { chromium } = require('playwright');
 
 const PORT = 3000;
 
@@ -35,6 +36,27 @@ const RECIPE_INGREDIENTS_FILE = 'recipe_ingredients.csv';
 const RECIPE_VOTES_FILE = 'recipe_votes.csv';
 
 const HOUSEHOLD_MEMBERS = ['Charlotte', 'Todd', 'Kayleigh'];
+
+// -------------------------------------------------------------
+// Every price you save from the Price Checker page goes in here.
+// Unlike the other CSVs, this one is pure history - saving the
+// same item twice adds a SECOND row rather than overwriting the
+// first, so price changes over time are kept rather than lost.
+// -------------------------------------------------------------
+const PRICES_FILE = 'prices.csv';
+const PRICE_HEADERS = ['id', 'item_name', 'price', 'cup_price', 'cup_measure', 'store', 'date_checked'];
+
+// -------------------------------------------------------------
+// Which physical Woolworths store to price everything from. A
+// fresh, brand-new browser (which is what Playwright uses every
+// time) has no idea which store you want, so without this it
+// silently defaults to some other store entirely (Glenfield, for
+// us). Found via Firefox DevTools -> Storage -> Cookies while
+// browsing woolworths.co.nz normally with "Woolworths Moorhouse
+// Ave" selected as the pickup store. If we ever change stores,
+// this is the value that needs updating the same way.
+// -------------------------------------------------------------
+const WOOLWORTHS_STORE_COOKIE = 'dm-Pickup,f-9169,a-495,s-10235';
 
 // -------------------------------------------------------------
 // A curated baseline of common grocery items with CORRECT
@@ -330,7 +352,104 @@ function getAllItemNames(callback) {
     });
 }
 
+// -------------------------------------------------------------
+// Opens a real (invisible) browser, searches Woolworths NZ for
+// the given term, and returns every matching product with its
+// price. This is a direct port of the Python/Playwright script
+// we proved working first, just translated to JavaScript so the
+// server can run it itself. headless: true means no visible
+// browser window pops up on the server - unlike our test script,
+// nobody's watching this one run.
+// -------------------------------------------------------------
+async function searchWoolworths(searchTerm) {
+    // TEMPORARY: switched to false to test a theory - headless
+    // (invisible) browsers sometimes get detected and blocked by
+    // sites with serious bot protection, even when the exact same
+    // script works fine with a visible one. This is purely a test;
+    // once confirmed, we'll decide what to do about it long-term.
+    const browser = await chromium.launch({ headless: false });
+    const context = await browser.newContext();
+
+    // Set the store cookie BEFORE the browser ever visits the site,
+    // so it behaves like a returning visitor who already picked
+    // Moorhouse - same trick we worked out in the Python version.
+    await context.addCookies([
+        {
+            name: 'cw-lrkswrdjp',
+            value: WOOLWORTHS_STORE_COOKIE,
+            domain: 'www.woolworths.co.nz',
+            path: '/'
+        }
+    ]);
+
+    const page = await context.newPage();
+    await page.goto('https://www.woolworths.co.nz/');
+    await page.waitForTimeout(2000);
+
+    // Same expect_response idea as the Python version - wait
+    // specifically for the search API response, don't just hope
+    // we're fast enough to catch it in the background.
+    const [response] = await Promise.all([
+        page.waitForResponse(
+            r => r.url().includes('/api/v1/products') && r.url().includes('search='),
+            { timeout: 15000 }
+        ),
+        (async () => {
+            await page.fill("input[type='search']", searchTerm);
+            // Give the site's own autocomplete dropdown a moment to
+            // finish loading before we press Enter - pressing it too
+            // early risks the dropdown's own JS swallowing the
+            // keypress before the real search fires.
+            await page.waitForTimeout(1500);
+            await page.keyboard.press('Enter');
+        })()
+    ]);
+
+    const data = await response.json();
+    await browser.close();
+
+    const items = (data.products && data.products.items) || [];
+    const store = data.context && data.context.fulfilment && data.context.fulfilment.address;
+
+    // Skip promotional carousels/banners mixed into the results -
+    // we only want real products - and reshape each one down to
+    // just what the price checker actually needs.
+    return items
+        .filter(item => item.type === 'Product')
+        .map(item => ({
+            name: item.name,
+            price: item.price ? item.price.salePrice : null,
+            cupPrice: item.size ? item.size.cupPrice : null,
+            cupMeasure: item.size ? item.size.cupMeasure : null,
+            store: store
+        }));
+}
+
+// Reads prices.csv. If the file doesn't exist yet (nobody has
+// saved a price yet), that's not an error - it just means an
+// empty history so far.
+function readPrices(callback) {
+    fs.readFile(PRICES_FILE, 'utf8', (err, data) => {
+        if (err) {
+            if (err.code === 'ENOENT') return callback(null, []);
+            return callback(err, null);
+        }
+        callback(null, parseCSV(data));
+    });
+}
+
+// Saves the FULL price history array back to prices.csv.
+function savePrices(prices, callback) {
+    fs.writeFile(PRICES_FILE, stringifyGenericCSV(PRICE_HEADERS, prices), 'utf8', callback);
+}
+
 const server = http.createServer((req, res) => {
+
+    // Parsed once here so any route below can read query string
+    // values (e.g. ?item=mince) via parsedUrl.searchParams, on top
+    // of the existing plain req.url string matching other routes
+    // already use.
+    const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
 
     // Let the browser talk to this server from a file:// page.
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -342,6 +461,88 @@ const server = http.createServer((req, res) => {
     if (req.method === 'OPTIONS') {
         res.writeHead(204);
         res.end();
+        return;
+    }
+
+    // ---- PRICE CHECKER: live search against Woolworths NZ ----
+    // Has to be checked BEFORE the pantry/fridge/freezer/chest
+    // routing below, same reasoning as the recipes routes.
+    if (parsedUrl.pathname === '/price-search' && req.method === 'GET') {
+        const searchTerm = parsedUrl.searchParams.get('item');
+
+        if (!searchTerm) {
+            res.writeHead(400, { 'Content-Type': 'text/plain' });
+            res.end('Missing ?item= search term');
+            return;
+        }
+
+        searchWoolworths(searchTerm)
+            .then(results => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(results));
+            })
+            .catch(err => {
+                console.error('Price search failed:', err);
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Could not complete the price search - Woolworths may be slow to respond, or their site has changed. Try again in a moment.');
+            });
+        return;
+    }
+
+    // ---- Every price ever saved, for the history list on the page ----
+    if (parsedUrl.pathname === '/prices' && req.method === 'GET') {
+        readPrices((err, prices) => {
+            if (err) {
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Could not read price history');
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(prices));
+        });
+        return;
+    }
+
+    // ---- Save ONE specific search result into the price history ----
+    if (parsedUrl.pathname === '/prices' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            const newPrice = JSON.parse(body);
+
+            readPrices((err, prices) => {
+                if (err) {
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Could not read price history');
+                    return;
+                }
+
+                // Every save is a NEW row - we're keeping full
+                // history, not overwriting a previous check of the
+                // same item.
+                const entry = {
+                    id: Date.now().toString(),
+                    item_name: newPrice.item_name,
+                    price: newPrice.price,
+                    cup_price: newPrice.cup_price,
+                    cup_measure: newPrice.cup_measure,
+                    store: newPrice.store,
+                    date_checked: new Date().toISOString()
+                };
+
+                prices.push(entry);
+
+                savePrices(prices, (err) => {
+                    if (err) {
+                        res.writeHead(500, { 'Content-Type': 'text/plain' });
+                        res.end('Could not save price history');
+                        return;
+                    }
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(entry));
+                });
+            });
+        });
         return;
     }
 
