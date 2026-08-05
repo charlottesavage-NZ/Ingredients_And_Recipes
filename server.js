@@ -48,7 +48,7 @@ const HOUSEHOLD_MEMBERS = ['Charlotte', 'Todd', 'Kayleigh'];
 // first, so price changes over time are kept rather than lost.
 // -------------------------------------------------------------
 const PRICES_FILE = 'prices.csv';
-const PRICE_HEADERS = ['id', 'item_name', 'price', 'cup_price', 'cup_measure', 'store', 'date_checked'];
+const PRICE_HEADERS = ['id', 'item_name', 'price', 'cup_price', 'cup_measure', 'package_size', 'store', 'date_checked'];
 
 // -------------------------------------------------------------
 // Which physical Woolworths store(s) to price things from. A
@@ -530,6 +530,11 @@ async function searchWoolworths(searchTerm, storeName) {
             price: item.price ? item.price.salePrice : null,
             cupPrice: item.size ? item.size.cupPrice : null,
             cupMeasure: item.size ? item.size.cupMeasure : null,
+            // e.g. "6 x 60mL" - confirmed via a raw response dump
+            // that this is the actual pack size, separate from
+            // cupMeasure above (which is the smaller comparison unit,
+            // e.g. "100mL").
+            packageSize: item.size ? item.size.volumeSize : null,
             store: store
         }));
 }
@@ -634,6 +639,12 @@ async function searchPakNSave(searchTerm, storeName) {
             price: typeof singlePrice.price === 'number' ? singlePrice.price / 100 : null,
             cupPrice: typeof comparativePrice.pricePerUnit === 'number' ? comparativePrice.pricePerUnit / 100 : null,
             cupMeasure: comparativePrice.measureDescription || null,
+            // e.g. "60g" - confirmed via a raw response dump. Note
+            // this is a straightforward pack size for most products,
+            // but Pak'nSave's cents-based pricing/comparative-price
+            // fields above are the more precise numbers to trust for
+            // any actual calculations.
+            packageSize: product.displayName || null,
             store: chosenStore
         };
     });
@@ -709,6 +720,11 @@ async function searchTrents(searchTerm) {
             price: product.price,
             cupPrice,
             cupMeasure,
+            // The plain pack size (e.g. "3kg", "6pk") - same value
+            // used to calculate cupPrice above where possible, but
+            // shown as its own column regardless, since it's useful
+            // to see even when a $/kg figure couldn't be calculated.
+            packageSize: product.size,
             store: TRENTS_STORE_NAME
         };
     });
@@ -846,6 +862,7 @@ const server = http.createServer((req, res) => {
                     price: newPrice.price,
                     cup_price: newPrice.cup_price,
                     cup_measure: newPrice.cup_measure,
+                    package_size: newPrice.package_size,
                     store: newPrice.store,
                     date_checked: new Date().toISOString()
                 };

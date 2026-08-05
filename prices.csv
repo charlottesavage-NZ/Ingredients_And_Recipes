@@ -1,13 +1,4 @@
-id,item_name,price,cup_price,cup_measure,store,date_checked
-1785813342768,woolworths nz beef mince grass fed 18% fat,21.99,21.99,1kg,Woolworths Moorhouse Ave,2026-08-04T03:15:42.768Z
-1785831624404,fancy feast grilled wet cat food salmon & shrimp,1.85,2.18,100g,Woolworths Moorhouse Ave,2026-08-04T08:20:24.405Z
-1785831654993,fancy feast grilled wet cat food salmon & shrimp,1.85,2.18,100g,Woolworths Northlands,2026-08-04T08:20:54.993Z
-1785834330044,fancy feast grilled wet cat food salmon & shrimp,1.85,2.18,100g,Woolworths Ferrymead,2026-08-04T09:05:30.045Z
-1785881117478,woolworths chicken mince breast,8.5,21.25,1kg,Woolworths Moorhouse Ave,2026-08-04T22:05:17.478Z
-1785895300495,Adult Petite Delights Chicken Grilled Wet Cat Food Pouch,0.99,1.98,100g,PAK'nSAVE Moorhouse,2026-08-05T02:01:40.495Z
-1785895357227,Adult Grilled Salmon Feast Gravy Wet Cat Food,1.69,1.99,100g,PAK'nSAVE Papanui,2026-08-05T02:02:37.228Z
-1785895381183,Grilled Salmon & Shrimp Feast In Gravy Adult Wet Cat Food,1.69,1.99,100g,PAK'nSAVE Riccarton,2026-08-05T02:03:01.183Z
-1785895410604,Adult Grilled Salmon Feast Gravy Wet Cat Food,1.69,1.99,100g,PAK'nSAVE Wainoni,2026-08-05T02:03:30.604Z
-1785900339042,Creamy Vanilla Ice Cream,6.99,0.35,100ml,PAK'nSAVE Wainoni,2026-08-05T03:25:39.042Z
-1785901374434,tip top ice cream vanilla,7.5,0.38,100mL,Woolworths Ferrymead,2026-08-05T03:42:54.434Z
-1785901383910,much moore awesome ice cream vanilla,7.99,0.4,100mL,Woolworths Ferrymead,2026-08-05T03:43:03.910Z
+id,item_name,price,cup_price,cup_measure,package_size,store,date_checked
+1785916665454,Pams Lamb & Chicken Dry Cat Food,4.03,4.03,kg calc,1kg,Trents Wholesale,2026-08-05T07:57:45.454Z
+1785916854549,Lamb & Chicken Dry Cat Food,5.15,0.52,100g,1kg,PAK'nSAVE Wainoni,2026-08-05T08:00:54.549Z
+1785916900712,Lamb & Chicken Dry Cat Food,5.15,0.52,100g,1kg,PAK'nSAVE Papanui,2026-08-05T08:01:40.712Z

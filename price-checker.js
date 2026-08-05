@@ -108,6 +108,7 @@ function renderResults(results) {
     thead.innerHTML = `
         <tr>
             <th>Item</th>
+            <th>Size</th>
             <th>Price</th>
             <th>Unit Price</th>
             <th></th>
@@ -145,6 +146,13 @@ function renderResults(results) {
         const nameCell = document.createElement('td');
         nameCell.textContent = result.name;
 
+        // Shows the pack size on its own (e.g. "200g", "3kg") - this
+        // is null for Woolworths/Pak'nSave until we've confirmed the
+        // right field to read it from, so falls back to a dash for
+        // now, same as any other missing value.
+        const sizeCell = document.createElement('td');
+        sizeCell.textContent = result.packageSize || "—";
+
         const priceCell = document.createElement('td');
         priceCell.textContent = `$${result.price}`;
 
@@ -155,6 +163,7 @@ function renderResults(results) {
         saveCell.appendChild(saveBtn);
 
         row.appendChild(nameCell);
+        row.appendChild(sizeCell);
         row.appendChild(priceCell);
         row.appendChild(unitPriceCell);
         row.appendChild(saveCell);
@@ -178,6 +187,7 @@ function savePrice(result) {
             price: result.price,
             cup_price: result.cupPrice,
             cup_measure: result.cupMeasure,
+            package_size: result.packageSize,
             store: result.store
         })
     })
@@ -220,6 +230,7 @@ function loadPriceHistory() {
             thead.innerHTML = `
                 <tr>
                     <th>Item</th>
+                    <th>Size</th>
                     <th>Price</th>
                     <th>Unit Price</th>
                     <th>Store</th>
@@ -249,6 +260,9 @@ function loadPriceHistory() {
                 const nameCell = document.createElement('td');
                 nameCell.textContent = entry.item_name;
 
+                const sizeCell = document.createElement('td');
+                sizeCell.textContent = entry.package_size || "—";
+
                 const priceCell = document.createElement('td');
                 priceCell.textContent = `$${entry.price}`;
 
@@ -262,6 +276,7 @@ function loadPriceHistory() {
                 dateCell.textContent = checkedDate;
 
                 row.appendChild(nameCell);
+                row.appendChild(sizeCell);
                 row.appendChild(priceCell);
                 row.appendChild(unitPriceCell);
                 row.appendChild(storeCell);
