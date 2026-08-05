@@ -70,7 +70,7 @@ searchBtn.addEventListener('click', function() {
     // The real search can take several seconds (a whole browser has
     // to open on the server and load a real page) - show something
     // so it's clear it's working, not stuck.
-    resultsContainer.innerHTML = "<p>Searching Woolworths...</p>";
+    resultsContainer.innerHTML = `<p>Searching ${storeName}...</p>`;
 
     fetch(`${SERVER_URL}/price-search?item=${encodeURIComponent(searchTerm)}&store=${encodeURIComponent(storeName)}`)
         .then(response => {
@@ -80,7 +80,7 @@ searchBtn.addEventListener('click', function() {
         .then(results => renderResults(results))
         .catch(error => {
             console.error('Price search failed:', error);
-            resultsContainer.innerHTML = "<p>Something went wrong searching Woolworths - try again in a moment.</p>";
+            resultsContainer.innerHTML = `<p>Something went wrong searching ${storeName} - try again in a moment.</p>`;
         });
 });
 

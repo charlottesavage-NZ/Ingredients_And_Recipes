@@ -67,15 +67,19 @@ const WOOLWORTHS_STORES = {
 const DEFAULT_WOOLWORTHS_STORE = 'Woolworths Moorhouse';
 
 // -------------------------------------------------------------
-// Not built yet - Pak'nSave will need its own scraper function
-// entirely (different site, different API, different cookies),
-// but keeping an empty list here means the store DROPDOWN on the
-// page is already future-proofed: one combined list for the
-// person using the app, even though the code behind it will stay
-// split by retailer. See the /stores and /price-search routes
-// below for how the two lists get combined and routed.
+// Which physical Pak'nSave store(s) to price things from - same
+// idea as WOOLWORTHS_STORES above, but Pak'nSave uses TWO cookies
+// together to remember your store rather than one. IDs found via
+// the "contentstackStores" data sitting in the page itself.
 // -------------------------------------------------------------
-const PAKNSAVE_STORES = {};
+const PAKNSAVE_STORES = {
+    "PAK'nSAVE Moorhouse": '61dd754e-8525-4b9e-9e08-173389eea8a8',
+    "PAK'nSAVE Papanui": '8cd700ae-d96f-4761-bd7a-805d6b93536d',
+    "PAK'nSAVE Riccarton": '4a279605-eaa8-470d-bcd4-0a9e3c9ab43b',
+    "PAK'nSAVE Wainoni": 'dbca5e00-f7f9-43ae-91de-031ad16f8a92'
+};
+
+const DEFAULT_PAKNSAVE_STORE = "PAK'nSAVE Moorhouse";
 
 // -------------------------------------------------------------
 // A curated baseline of common grocery items with CORRECT
@@ -449,6 +453,112 @@ async function searchWoolworths(searchTerm, storeName) {
         }));
 }
 
+// -------------------------------------------------------------
+// Same idea as searchWoolworths above, but for Pak'nSave. The
+// site is protected by Cloudflare (not the same protection as
+// Woolworths, but the same underlying reasoning applies) - a real
+// browser is needed to naturally pass its checks and generate a
+// valid session, which we then read the response from rather
+// than trying to fake ourselves.
+// -------------------------------------------------------------
+async function searchPakNSave(searchTerm, storeName) {
+    const chosenStore = PAKNSAVE_STORES[storeName] ? storeName : DEFAULT_PAKNSAVE_STORE;
+    const storeId = PAKNSAVE_STORES[chosenStore];
+
+    const browser = await chromium.launch({ headless: false });
+    const context = await browser.newContext();
+
+    // Pak'nSave remembers your chosen store across TWO cookies
+    // together, rather than Woolworths' single one. Set before the
+    // site ever loads, same reasoning as before.
+    await context.addCookies([
+        {
+            name: 'eCom_STORE_ID',
+            value: storeId,
+            domain: 'www.paknsave.co.nz',
+            path: '/'
+        },
+        {
+            name: 'STORE_ID_V2',
+            value: `${storeId}|False`,
+            domain: 'www.paknsave.co.nz',
+            path: '/'
+        }
+    ]);
+
+    const page = await context.newPage();
+
+    // Pak'nSave's site asks the browser for your location. With a
+    // real, visible browser, that shows an actual popup that just
+    // sits there waiting for someone to click something - which
+    // would stall the whole search. This runs BEFORE any of the
+    // site's own code, replacing the location API with a version
+    // that immediately says "no" on its own, so the real popup
+    // never gets a chance to appear at all.
+    await page.addInitScript(() => {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition = (success, error) => {
+                if (error) error({ code: 1, message: 'User denied Geolocation' });
+            };
+            navigator.geolocation.watchPosition = (success, error) => {
+                if (error) error({ code: 1, message: 'User denied Geolocation' });
+                return 0;
+            };
+        }
+    });
+
+    // Loading the homepage first lets the site's own JavaScript do
+    // two things we can't fake ourselves: solve Cloudflare's bot
+    // check (earning a valid cf_clearance cookie) and set up its
+    // own short-lived anonymous session token, used to authorize
+    // the product-price request below.
+    await page.goto('https://www.paknsave.co.nz/');
+    await page.waitForTimeout(3000);
+
+    // Found via Inspect Element on the real site - this input has
+    // a proper id, so we can target it exactly rather than guessing.
+    const [response] = await Promise.all([
+        page.waitForResponse(
+            r => r.url().includes('/v1/edge/search/paginated/products') && r.request().method() === 'POST',
+            { timeout: 20000 }
+        ),
+        (async () => {
+            await page.fill("#search-bar-desktop", searchTerm);
+            await page.waitForTimeout(1500);
+            await page.keyboard.press('Enter');
+        })()
+    ]);
+
+    const data = await response.json();
+
+    // Reads back which store ID actually went out in the request
+    // itself - lets us directly confirm the two cookies above
+    // worked, rather than just hoping they did.
+    const requestBody = response.request().postDataJSON();
+    const storeIdUsed = requestBody ? requestBody.storeId : null;
+    console.log(`Pak'nSave store ID used: ${storeIdUsed}`);
+
+    await browser.close();
+
+    const products = data.products || [];
+
+    return products.map(product => {
+        const singlePrice = product.singlePrice || {};
+        const comparativePrice = singlePrice.comparativePrice || {};
+
+        return {
+            name: product.name,
+            // Pak'nSave gives prices in CENTS (1849 = $18.49), unlike
+            // Woolworths' plain decimal dollars - divide by 100.
+            price: typeof singlePrice.price === 'number' ? singlePrice.price / 100 : null,
+            cupPrice: typeof comparativePrice.pricePerUnit === 'number' ? comparativePrice.pricePerUnit / 100 : null,
+            cupMeasure: comparativePrice.measureDescription || null,
+            store: chosenStore
+        };
+    });
+}
+
+
 // Reads prices.csv. If the file doesn't exist yet (nobody has
 // saved a price yet), that's not an error - it just means an
 // empty history so far.
@@ -519,7 +629,7 @@ const server = http.createServer((req, res) => {
         // still tells us which retailer's scraper to actually run.
         const isPakNSaveStore = Object.prototype.hasOwnProperty.call(PAKNSAVE_STORES, storeName);
         const searchPromise = isPakNSaveStore
-            ? Promise.reject(new Error("Pak'nSave isn't built yet"))
+            ? searchPakNSave(searchTerm, storeName)
             : searchWoolworths(searchTerm, storeName);
 
         searchPromise
