@@ -9,6 +9,10 @@ const http = require('http');
 const fs = require('fs');
 const { chromium } = require('playwright');
 
+// Trents login details live in their own gitignored file, never
+// typed directly into this file - see credentials.js.
+const { TRENTS_USERNAME, TRENTS_PASSWORD } = require('./credentials');
+
 const PORT = 3000;
 
 // -------------------------------------------------------------
@@ -82,6 +86,13 @@ const PAKNSAVE_STORES = {
 const DEFAULT_PAKNSAVE_STORE = "PAK'nSAVE Moorhouse";
 
 // -------------------------------------------------------------
+// Trents Wholesale - just one store/account, unlike the two above,
+// so there's no list of options here, just a single name that
+// shows up in the combined dropdown alongside the others.
+// -------------------------------------------------------------
+const TRENTS_STORE_NAME = 'Trents Wholesale';
+
+// -------------------------------------------------------------
 // A curated baseline of common grocery items with CORRECT
 // spelling. This exists so the dropdown always has trustworthy
 // suggestions available, even before you've typed anything
@@ -138,6 +149,76 @@ function isVolumeUnit(unit) {
 // Converts a quantity into millilitres
 function toMilliliters(quantity, unit) {
     return quantity * VOLUME_UNITS_TO_ML[unit];
+}
+
+// -------------------------------------------------------------
+// Trents shows a pack size like "3kg", "500g", or "1kg" instead of
+// a ready-made price-per-kg figure like Woolworths/Pak'nSave give
+// us. This pulls the number and unit apart (e.g. "3kg" -> 3 and
+// "kg"), so we can reuse the SAME toGrams/toMilliliters functions
+// above to work out a per-kg/per-L price ourselves.
+//
+// Things like "6pk" (a pack of 6, not a weight) deliberately don't
+// match this pattern - there's no number-then-weight-unit shape to
+// find, so callers get back null and know to skip the calculation.
+// -------------------------------------------------------------
+function parseSizeToBaseUnit(sizeText) {
+    if (!sizeText) return null;
+
+    const match = sizeText.trim().match(/^([\d.]+)\s*([a-zA-Z]+)$/);
+    if (!match) return null;
+
+    const quantity = Number(match[1]);
+    const unit = match[2].toLowerCase();
+
+    if (isWeightUnit(unit)) {
+        return { grams: toGrams(quantity, unit) };
+    }
+    if (isVolumeUnit(unit)) {
+        return { milliliters: toMilliliters(quantity, unit) };
+    }
+
+    // Recognised as a number+letters shape, but not a unit we know
+    // how to convert (e.g. "6pk") - nothing to calculate.
+    return null;
+}
+
+// -------------------------------------------------------------
+// Works out a calculated per-kg or per-L price for one Trents
+// product, using its price and pack size. Returns the SAME
+// cupPrice/cupMeasure shape the price checker already expects
+// from Woolworths/Pak'nSave, just calculated by us instead of
+// handed to us ready-made.
+//
+// If we can't confidently calculate one (no price, no size, or a
+// size like "6pk" that isn't a weight/volume at all), cupPrice
+// comes back null and cupMeasure falls back to the plain size text
+// instead - e.g. "6pk" on its own, with no price attached to it.
+// -------------------------------------------------------------
+function calculateTrentsUnitPrice(price, sizeText) {
+    const parsedSize = parseSizeToBaseUnit(sizeText);
+
+    if (!parsedSize || !price) {
+        return { cupPrice: null, cupMeasure: sizeText || null };
+    }
+
+    if (parsedSize.grams) {
+        const pricePerKg = price / (parsedSize.grams / 1000);
+        return {
+            cupPrice: Math.round(pricePerKg * 100) / 100,
+            cupMeasure: 'kg calc'
+        };
+    }
+
+    if (parsedSize.milliliters) {
+        const pricePerLitre = price / (parsedSize.milliliters / 1000);
+        return {
+            cupPrice: Math.round(pricePerLitre * 100) / 100,
+            cupMeasure: 'L calc'
+        };
+    }
+
+    return { cupPrice: null, cupMeasure: sizeText || null };
 }
 
 // -------------------------------------------------------------
@@ -559,6 +640,81 @@ async function searchPakNSave(searchTerm, storeName) {
 }
 
 
+// -------------------------------------------------------------
+// Searches Trents Wholesale for the given term. Unlike Woolworths/
+// Pak'nSave, this needs a real login every time rather than just a
+// store cookie - proven separately first via trents-login-check.js
+// and trents-next-test.js before being folded in here. Trents also
+// doesn't hand back a clean JSON API response like the other two,
+// so results are read straight out of the rendered results page
+// instead of intercepted from a background request.
+// -------------------------------------------------------------
+async function searchTrents(searchTerm) {
+    const browser = await chromium.launch({ headless: false });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    await page.goto('https://online.trents.co.nz/');
+    await page.waitForTimeout(2000);
+
+    // Target by "name" rather than "id" - the real ids have colons
+    // in them (tcc_sitelogin:loginForm:username), which CSS
+    // selectors treat as special characters.
+    await page.fill('input[name="tcc_sitelogin:loginForm:username"]', TRENTS_USERNAME);
+    await page.fill('input[name="tcc_sitelogin:loginForm:password"]', TRENTS_PASSWORD);
+    await page.keyboard.press('Enter');
+
+    // Login goes through a Salesforce handoff page (frontdoor.jsp)
+    // that redirects itself on to the real homepage - wait
+    // specifically for that, rather than guessing how long it takes.
+    await page.waitForURL('**/ccrz__HomePage**', { timeout: 15000 });
+    await page.waitForLoadState('networkidle');
+
+    await page.fill('#searchText', searchTerm);
+    await page.click('#doSearch');
+
+    await page.waitForURL('**/ccrz__ProductList**', { timeout: 15000 });
+    await page.waitForLoadState('networkidle');
+
+    // Runs INSIDE the browser page itself, against every product
+    // tile on the results page - reads name, price, and pack size
+    // straight out of the rendered HTML.
+    const rawProducts = await page.$$eval('.cc_product_item', items => {
+        return items.map(item => {
+            const name = item.querySelector('.cc_product_name')?.textContent.trim() || null;
+            const size = item.querySelector('.cc_product_uom')?.textContent.trim() || null;
+
+            // The price element's text includes the "/ Carton" or
+            // "/ Each" span text glued on the end (e.g. "$22.11/
+            // Carton"), so pull just the $ amount out with a pattern
+            // match rather than trying to separate the text nodes.
+            const priceBlock = item.querySelector('.product-list-price')?.textContent || '';
+            const priceMatch = priceBlock.match(/\$([\d.]+)/);
+            const price = priceMatch ? Number(priceMatch[1]) : null;
+
+            return { name, size, price };
+        });
+    });
+
+    await browser.close();
+
+    // Reshape into the SAME shape searchWoolworths()/searchPakNSave()
+    // return, so the price checker page doesn't need to know or care
+    // which retailer a result came from. cupPrice/cupMeasure here
+    // are OUR OWN calculation, not one Trents publishes themselves.
+    return rawProducts.map(product => {
+        const { cupPrice, cupMeasure } = calculateTrentsUnitPrice(product.price, product.size);
+        return {
+            name: product.name,
+            price: product.price,
+            cupPrice,
+            cupMeasure,
+            store: TRENTS_STORE_NAME
+        };
+    });
+}
+
+
 // Reads prices.csv. If the file doesn't exist yet (nobody has
 // saved a price yet), that's not an error - it just means an
 // empty history so far.
@@ -604,7 +760,8 @@ const server = http.createServer((req, res) => {
     if (parsedUrl.pathname === '/stores' && req.method === 'GET') {
         const allStoreNames = [
             ...Object.keys(WOOLWORTHS_STORES),
-            ...Object.keys(PAKNSAVE_STORES)
+            ...Object.keys(PAKNSAVE_STORES),
+            TRENTS_STORE_NAME
         ];
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(allStoreNames));
@@ -628,9 +785,16 @@ const server = http.createServer((req, res) => {
         // The dropdown is one combined list, but each store name
         // still tells us which retailer's scraper to actually run.
         const isPakNSaveStore = Object.prototype.hasOwnProperty.call(PAKNSAVE_STORES, storeName);
-        const searchPromise = isPakNSaveStore
-            ? searchPakNSave(searchTerm, storeName)
-            : searchWoolworths(searchTerm, storeName);
+        const isTrentsStore = storeName === TRENTS_STORE_NAME;
+
+        let searchPromise;
+        if (isTrentsStore) {
+            searchPromise = searchTrents(searchTerm);
+        } else if (isPakNSaveStore) {
+            searchPromise = searchPakNSave(searchTerm, storeName);
+        } else {
+            searchPromise = searchWoolworths(searchTerm, storeName);
+        }
 
         searchPromise
             .then(results => {

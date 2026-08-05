@@ -120,12 +120,22 @@ function renderResults(results) {
     results.forEach(result => {
         const row = document.createElement('tr');
 
-        // Some products (priced "per each" rather than by weight)
-        // don't have a unit price at all - show a dash rather than
-        // leaving the cell blank or saying "null".
-        const unitPriceText = result.cupMeasure
-            ? `$${result.cupPrice} / ${result.cupMeasure}`
-            : "—";
+        // Three possible cases here:
+        // - A real price-per-unit exists (Woolworths/Pak'nSave's own
+        //   figure, or our own calculated Trents "$/kg calc") -> show
+        //   it as "$X / measure".
+        // - No price, but there's still a plain size worth showing
+        //   (e.g. Trents' "6pk", which can't be turned into a $/kg
+        //   figure) -> show just the size text on its own.
+        // - Neither -> show a dash rather than leaving it blank.
+        let unitPriceText;
+        if (result.cupPrice && result.cupMeasure) {
+            unitPriceText = `$${result.cupPrice} / ${result.cupMeasure}`;
+        } else if (result.cupMeasure) {
+            unitPriceText = result.cupMeasure;
+        } else {
+            unitPriceText = "—";
+        }
 
         const saveBtn = document.createElement('button');
         saveBtn.type = 'button';
@@ -223,9 +233,17 @@ function loadPriceHistory() {
             sorted.forEach(entry => {
                 const row = document.createElement('tr');
 
-                const unitPriceText = entry.cup_measure
-                    ? `$${entry.cup_price} / ${entry.cup_measure}`
-                    : "—";
+                // Same three-way logic as the live search results
+                // above - a real calculated/official unit price, a
+                // plain size with no price, or nothing at all.
+                let unitPriceText;
+                if (entry.cup_price && entry.cup_measure) {
+                    unitPriceText = `$${entry.cup_price} / ${entry.cup_measure}`;
+                } else if (entry.cup_measure) {
+                    unitPriceText = entry.cup_measure;
+                } else {
+                    unitPriceText = "—";
+                }
                 const checkedDate = new Date(entry.date_checked).toLocaleDateString();
 
                 const nameCell = document.createElement('td');
