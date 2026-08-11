@@ -51,6 +51,16 @@ const PRICES_FILE = 'prices.csv';
 const PRICE_HEADERS = ['id', 'item_name', 'price', 'cup_price', 'cup_measure', 'package_size', 'store', 'date_checked'];
 
 // -------------------------------------------------------------
+// Maps alternate ingredient names to one canonical name, so
+// "Diced Tomatoes In Juice" and "Tinned Tomatoes" can be
+// recognised as the same thing when matching recipes against
+// pantry stock. Built up gradually - a new row only gets added
+// when a real mismatch actually comes up, not upfront.
+// -------------------------------------------------------------
+const ALIASES_FILE = 'ingredient_aliases.csv';
+const ALIAS_HEADERS = ['alias', 'canonical_name'];
+
+// -------------------------------------------------------------
 // Which physical Woolworths store(s) to price things from. A
 // fresh, brand-new browser (which is what Playwright uses every
 // time) has no idea which store you want, so without this it
@@ -181,6 +191,20 @@ function parseSizeToBaseUnit(sizeText) {
     // Recognised as a number+letters shape, but not a unit we know
     // how to convert (e.g. "6pk") - nothing to calculate.
     return null;
+}
+
+// -------------------------------------------------------------
+// Trents' website shows every price WITHOUT GST - unlike
+// Woolworths/Pak'nSave, which both already include it. NZ GST is
+// currently 15%, so this turns their $22.11 (before tax) into the
+// real $25.43 (what you'd actually pay), so every store in the
+// price checker is comparing like-for-like.
+// -------------------------------------------------------------
+const NZ_GST_RATE = 0.15;
+
+function addGst(exGstPrice) {
+    if (typeof exGstPrice !== 'number') return null;
+    return Math.round(exGstPrice * (1 + NZ_GST_RATE) * 100) / 100;
 }
 
 // -------------------------------------------------------------
@@ -714,10 +738,15 @@ async function searchTrents(searchTerm) {
     // which retailer a result came from. cupPrice/cupMeasure here
     // are OUR OWN calculation, not one Trents publishes themselves.
     return rawProducts.map(product => {
-        const { cupPrice, cupMeasure } = calculateTrentsUnitPrice(product.price, product.size);
+        // Trents shows prices excluding GST - add it BEFORE
+        // calculating a per-kg price, so that figure is GST-inclusive
+        // too, not just the headline price.
+        const priceIncludingGst = addGst(product.price);
+
+        const { cupPrice, cupMeasure } = calculateTrentsUnitPrice(priceIncludingGst, product.size);
         return {
             name: product.name,
-            price: product.price,
+            price: priceIncludingGst,
             cupPrice,
             cupMeasure,
             // The plain pack size (e.g. "3kg", "6pk") - same value
@@ -747,6 +776,23 @@ function readPrices(callback) {
 // Saves the FULL price history array back to prices.csv.
 function savePrices(prices, callback) {
     fs.writeFile(PRICES_FILE, stringifyGenericCSV(PRICE_HEADERS, prices), 'utf8', callback);
+}
+
+// Reads ingredient_aliases.csv. If it doesn't exist yet (no
+// aliases added so far), that's not an error - just no aliases.
+function readAliases(callback) {
+    fs.readFile(ALIASES_FILE, 'utf8', (err, data) => {
+        if (err) {
+            if (err.code === 'ENOENT') return callback(null, []);
+            return callback(err, null);
+        }
+        callback(null, parseCSV(data));
+    });
+}
+
+// Saves the FULL alias list back to ingredient_aliases.csv.
+function saveAliases(aliases, callback) {
+    fs.writeFile(ALIASES_FILE, stringifyGenericCSV(ALIAS_HEADERS, aliases), 'utf8', callback);
 }
 
 const server = http.createServer((req, res) => {
@@ -1179,6 +1225,66 @@ const server = http.createServer((req, res) => {
             }
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(names));
+        });
+        return;
+    }
+
+    // ---- All known ingredient aliases ----
+    if (req.url === '/ingredient-aliases' && req.method === 'GET') {
+        readAliases((err, aliases) => {
+            if (err) {
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Could not read ingredient aliases');
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(aliases));
+        });
+        return;
+    }
+
+    // ---- Add a new alias ----
+    if (req.url === '/ingredient-aliases' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+            let alias, canonical_name;
+            try {
+                ({ alias, canonical_name } = JSON.parse(body));
+            } catch (err) {
+                res.writeHead(400, { 'Content-Type': 'text/plain' });
+                res.end('Invalid JSON in request body');
+                return;
+            }
+
+            readAliases((err, aliases) => {
+                if (err) {
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Could not read ingredient aliases');
+                    return;
+                }
+
+                // If this exact alias already exists, update which
+                // canonical name it points to rather than adding a
+                // duplicate row.
+                const existing = aliases.find(a => a.alias.toLowerCase() === alias.toLowerCase());
+
+                if (existing) {
+                    existing.canonical_name = canonical_name;
+                } else {
+                    aliases.push({ alias, canonical_name });
+                }
+
+                saveAliases(aliases, (err) => {
+                    if (err) {
+                        res.writeHead(500, { 'Content-Type': 'text/plain' });
+                        res.end('Could not save ingredient aliases');
+                        return;
+                    }
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ alias, canonical_name }));
+                });
+            });
         });
         return;
     }

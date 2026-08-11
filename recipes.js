@@ -24,6 +24,11 @@ let editingRecipeId = null;
 let currentRecipes = [];
 let currentInventory = [];
 
+// Every known ingredient alias (e.g. "Diced Tomatoes In Juice" ->
+// "Tinned Tomatoes"), used by checkRecipeAvailability() below so
+// differently-worded names for the same thing still match.
+let currentAliases = [];
+
 // Who's currently selected in the "Who's voting?" dropdown.
 // Empty string means nobody's picked yet.
 let currentPerson = '';
@@ -82,24 +87,45 @@ function formatQuantity(quantity, unit) {
 }
 
 // -------------------------------------------------------------
+// Looks up a name in the alias list and returns its canonical
+// name if one exists (e.g. "Beef Mince" -> "Mince"), otherwise
+// just returns the name unchanged. Used by checkRecipeAvailability
+// below so a recipe and the pantry can be worded completely
+// differently and still be recognised as the same ingredient.
+// -------------------------------------------------------------
+function resolveIngredientName(name, aliases) {
+    const match = aliases.find(a => a.alias.toLowerCase() === name.toLowerCase());
+    return match ? match.canonical_name : name;
+}
+
+// -------------------------------------------------------------
 // Compares one recipe's ingredients against the combined house
 // inventory. Returns whether you can make it, and a detailed list
 // of what's short and by how much.
 // -------------------------------------------------------------
-function checkRecipeAvailability(recipe, inventory) {
+function checkRecipeAvailability(recipe, inventory, aliases) {
     const missing = [];
 
     recipe.ingredients.forEach(ing => {
         const needed = toBaseUnit(Number(ing.quantity), ing.unit);
 
-        // Find a matching inventory item by name AND base unit -
-        // if the units don't match (e.g. recipe wants "each" but
-        // you only have it in grams), we can't compare them fairly,
-        // so it's treated the same as having zero.
-        const match = inventory.find(item =>
-            item.name.toLowerCase() === ing.ingredient_name.toLowerCase() &&
-            item.unit === needed.unit
-        );
+        // Resolve the recipe's ingredient name to its canonical form
+        // first (e.g. "Beef Mince" -> "Mince"), so it's compared on
+        // equal footing with whatever's actually in the pantry.
+        const neededCanonicalName = resolveIngredientName(ing.ingredient_name, aliases);
+
+        // Find a matching inventory item by CANONICAL name and base
+        // unit - each pantry item also gets resolved through the
+        // alias list, so "Diced Tomatoes In Juice" in the pantry
+        // correctly matches a recipe asking for "Tinned Tomatoes".
+        // If the units don't match (e.g. recipe wants "each" but you
+        // only have it in grams), we can't compare them fairly, so
+        // it's treated the same as having zero.
+        const match = inventory.find(item => {
+            const itemCanonicalName = resolveIngredientName(item.name, aliases);
+            return itemCanonicalName.toLowerCase() === neededCanonicalName.toLowerCase() &&
+                item.unit === needed.unit;
+        });
 
         const have = match ? Number(match.quantity) : 0;
 
@@ -453,12 +479,14 @@ function loadEverything() {
     Promise.all([
         fetch(`${SERVER_URL}/recipes`).then(r => r.json()),
         fetch(`${SERVER_URL}/inventory-all`).then(r => r.json()),
-        fetch(`${SERVER_URL}/household-members`).then(r => r.json())
+        fetch(`${SERVER_URL}/household-members`).then(r => r.json()),
+        fetch(`${SERVER_URL}/ingredient-aliases`).then(r => r.json())
     ])
-        .then(([recipes, inventory, people]) => {
+        .then(([recipes, inventory, people, aliases]) => {
             currentRecipes = recipes;
             currentInventory = inventory;
             currentHouseholdMembers = people;
+            currentAliases = aliases;
             populatePersonDropdown(people);
             populateVoteFilterOptions(people);
 
@@ -512,7 +540,7 @@ function renderRecipes(recipes) {
             .map(ing => `<li>${ing.ingredient_name} — ${ing.quantity} ${ing.unit}</li>`)
             .join('');
 
-        const availability = checkRecipeAvailability(recipe, currentInventory);
+        const availability = checkRecipeAvailability(recipe, currentInventory, currentAliases);
 
         // Show a clear yes/no plus, if missing anything, a list of
         // exactly what and how much more is needed.

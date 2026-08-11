@@ -171,3 +171,43 @@ input[type="number"] {
 .price-results-table button {
     margin-top: 0;
 }
+
+/* ===================== RECIPE CARDS ===================== */
+
+/* Adds a visible divider between each saved recipe, and a bit of
+   breathing room around every section within a card (ingredients,
+   instructions, missing list, votes) so they don't run together. */
+.recipe-card {
+    padding: 1px, 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.recipe-card:last-child {
+    border-bottom: none;
+}
+
+.recipe-card > * {
+    margin-bottom: 12px;
+}
+
+.recipe-card ul {
+    padding-left: 20px;
+}
+
+.missing-list {
+    padding-left: 20px;
+}
+
+.can-make {
+    font-weight: bold;
+}
+
+/* Votes are short "Name: emoji" entries, not a real list - drop
+   the bullets and lay them out as a compact row instead. */
+.vote-list {
+    list-style: none;
+    padding-left: 0;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
