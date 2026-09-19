@@ -68,7 +68,7 @@ body {
 /* This controls the main layout area where all sections appear.
    We stack everything vertically because we now have one input box and four lists. */
 main {
-    display: flex;         /* stacks children vertically */
+    display: flex;         
     flex-direction: column;
     gap: 30px;             /* spacing between sections */
 }

@@ -6,7 +6,7 @@
 // vote like/dislike on each recipe.
 // -------------------------------------------------------------
 
-const SERVER_URL = 'http://localhost:3000';
+const SERVER_URL = '/recipes';
 
 const ingredientRowsContainer = document.getElementById('ingredient-rows');
 const recipeList = document.getElementById('recipe-list');

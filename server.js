@@ -1395,6 +1395,6 @@ const server = http.createServer((req, res) => {
     res.end('Method not allowed');
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
     console.log(`Server is running at http://localhost:${PORT}`);
 });

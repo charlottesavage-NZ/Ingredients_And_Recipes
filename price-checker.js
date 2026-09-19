@@ -3,7 +3,7 @@
 // price-search route, shows every matching product, and lets you
 // save individual results into a running price history CSV.
 // -------------------------------------------------------------
-const SERVER_URL = 'http://localhost:3000';
+const SERVER_URL = '/recipes';
 
 // -------------------------------------------------------------
 // Reuses the same known-item-names endpoint as the other pages,

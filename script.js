@@ -6,7 +6,7 @@
 // -------------------------------------------------------------
 // Base address of our local server. Every section talks to its own
 // address on the server, e.g. http://localhost:3000/pantry
-const SERVER_URL = 'http://localhost:3000';
+const SERVER_URL = '/recipes';
 
 // -------------------------------------------------------------
 // Converts a gram amount back into a friendly display format
