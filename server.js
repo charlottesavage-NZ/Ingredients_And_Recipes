@@ -481,13 +481,18 @@ function getAllItemNames(callback) {
 }
 
 // -------------------------------------------------------------
-// Opens a real (invisible) browser, searches Woolworths NZ for
-// the given term, and returns every matching product with its
-// price. This is a direct port of the Python/Playwright script
-// we proved working first, just translated to JavaScript so the
-// server can run it itself. headless: true means no visible
-// browser window pops up on the server - unlike our test script,
-// nobody's watching this one run.
+// Opens a real browser, searches Woolworths NZ for the given
+// term, and returns every matching product with its price.
+//
+// UPDATED: Woolworths changed how their website fetches search
+// results. It used to call /api/v1/products and get back a flat
+// list of items. It now sends a GraphQL request to
+// /api/graphql?op-name=ProductSearch and gets back a differently
+// shaped reply, so this function now (1) listens for that new
+// request, and (2) reads the prices out of the new shape.
+//
+// The browser still runs with headless: false. On the server this
+// works because xvfb-run supplies a virtual screen for it.
 // -------------------------------------------------------------
 async function searchWoolworths(searchTerm, storeName) {
     // Fall back to the default store if none was given, or if
@@ -495,11 +500,8 @@ async function searchWoolworths(searchTerm, storeName) {
     const chosenStore = WOOLWORTHS_STORES[storeName] ? storeName : DEFAULT_WOOLWORTHS_STORE;
     const storeCookie = WOOLWORTHS_STORES[chosenStore];
 
-    // TEMPORARY: switched to false to test a theory - headless
-    // (invisible) browsers sometimes get detected and blocked by
-    // sites with serious bot protection, even when the exact same
-    // script works fine with a visible one. This is purely a test;
-    // once confirmed, we'll decide what to do about it long-term.
+    // Visible (non-headless) browser - Woolworths' bot protection
+    // is more likely to block an invisible one.
     const browser = await chromium.launch({ headless: false });
     const context = await browser.newContext();
 
@@ -519,12 +521,17 @@ async function searchWoolworths(searchTerm, storeName) {
     await page.goto('https://www.woolworths.co.nz/');
     await page.waitForTimeout(2000);
 
-    // Same expect_response idea as the Python version - wait
-    // specifically for the search API response, don't just hope
+    // Wait specifically for the search response, don't just hope
     // we're fast enough to catch it in the background.
+    // The home page ALSO sends a ProductSearch request by itself
+    // (it loads a product group, not a keyword search), so matching
+    // the address alone would catch the wrong one. Every real search
+    // request contains "byKeyword" in its body, so we check for that
+    // too, which makes sure we catch the response to OUR search.
     const [response] = await Promise.all([
         page.waitForResponse(
-            r => r.url().includes('/api/v1/products') && r.url().includes('search='),
+            r => r.url().includes('/api/graphql?op-name=ProductSearch') &&
+                 (r.request().postData() || '').includes('"byKeyword"'),
             { timeout: 15000 }
         ),
         (async () => {
@@ -541,26 +548,55 @@ async function searchWoolworths(searchTerm, storeName) {
     const data = await response.json();
     await browser.close();
 
-    const items = (data.products && data.products.items) || [];
-    const store = data.context && data.context.fulfilment && data.context.fulfilment.address;
+    // The list of results now lives at data.My.products.results.
+    // The "(x && x.y)" checks stop the code crashing if any part of
+    // that path is missing - it falls back to an empty list instead.
+    const myData = data.data && data.data.My;
+    const results = (myData && myData.products && myData.products.results) || [];
 
-    // Skip promotional carousels/banners mixed into the results -
-    // we only want real products - and reshape each one down to
-    // just what the price checker actually needs.
-    return items
-        .filter(item => item.type === 'Product')
-        .map(item => ({
-            name: item.name,
-            price: item.price ? item.price.salePrice : null,
-            cupPrice: item.size ? item.size.cupPrice : null,
-            cupMeasure: item.size ? item.size.cupMeasure : null,
-            // e.g. "6 x 60mL" - confirmed via a raw response dump
-            // that this is the actual pack size, separate from
-            // cupMeasure above (which is the smaller comparison unit,
-            // e.g. "100mL").
-            packageSize: item.size ? item.size.volumeSize : null,
-            store: store
-        }));
+    // This will hold one row per product "variant" (see below).
+    const rows = [];
+
+    // The results list mixes real products with adverts and banners.
+    // "ProductSummary" is a normal product - skip everything else.
+    results
+        .filter(item => item.__typename === 'ProductSummary')
+        .forEach(item => {
+
+            // Each product has one or more "variants" - different
+            // ways to buy it. Most have just one, but loose fruit
+            // and veg often have two: "per kg" and "each". Each
+            // variant has its own price, so each gets its own row.
+            item.variants.forEach(variant => {
+                const price = variant.variantPrice;
+
+                // Skip any variant that has no price information.
+                if (!price) return;
+
+                rows.push({
+                    name: item.productName,
+                    // What you actually pay for this variant.
+                    price: price.sellingPrice,
+                    // Woolworths' own comparison price, e.g. 16.45
+                    // for "1KG". cupUnit looks like "1KG", "1EA"
+                    // or "100G", so it shows as "$16.45 / 1KG".
+                    cupPrice: price.cupPrice,
+                    cupMeasure: price.cupUnit,
+                    // The old reply had a separate pack size field
+                    // (e.g. "6 x 60mL"). The new one doesn't - the
+                    // size is only written inside the product name
+                    // (e.g. "...Cherry 180g Punnet") - so this is
+                    // null for now and shows as a dash on the page.
+                    packageSize: null,
+                    // The new reply doesn't include the store's
+                    // address like the old one did, so we use the
+                    // store name that was chosen in the dropdown.
+                    store: chosenStore
+                });
+            });
+        });
+
+    return rows;
 }
 
 // -------------------------------------------------------------
