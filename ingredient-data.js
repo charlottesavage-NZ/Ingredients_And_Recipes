@@ -622,4 +622,66 @@ const EXTRA_INGREDIENT_NAMES = [
     'Frozen Fish Fillets', 'Frozen Dumplings', 'Spring Rolls'
 ];
 
-module.exports = { BUILT_IN_ALIASES, EXTRA_INGREDIENT_NAMES };
+// -------------------------------------------------------------
+// TINNED GOODS - lets you use "tins" as a unit, both when adding
+// stock ("10 tins of tomatoes") and in recipes ("1 tin chickpeas").
+// A tin always gets turned into its weight straight away (10 tins
+// of tomatoes = 4000 g), so it all adds up with anything entered in
+// grams, and the Inventory page shows the tin count next to it.
+//
+// Anything NOT listed here can still be entered in tins - it just
+// counts as DEFAULT_TIN_SIZE (400 g, the standard NZ tin).
+// Sizes checked against Pak'nSave / Woolworths NZ (Wattie's, Pams,
+// Sealord etc.) - most are 400 g, a few common ones aren't.
+//
+// "base" is only needed when the tinned name is different from the
+// plain one - e.g. "Tin of Tomatoes" should mean Tinned Tomatoes,
+// NOT fresh tomatoes.
+// -------------------------------------------------------------
+const DEFAULT_TIN_SIZE = { quantity: 400, unit: 'g' };
+
+const TINNED_GOODS = [
+    { name: 'Tinned Tomatoes', base: 'Tomatoes', quantity: 400, unit: 'g' },
+    { name: 'Baked Beans', quantity: 420, unit: 'g' },
+    { name: 'Spaghetti In A Tin', base: 'Spaghetti', quantity: 420, unit: 'g' },
+    { name: 'Chickpeas', quantity: 400, unit: 'g' },
+    { name: 'Kidney Beans', quantity: 400, unit: 'g' },
+    { name: 'Black Beans', quantity: 400, unit: 'g' },
+    { name: 'Cannellini Beans', quantity: 400, unit: 'g' },
+    { name: 'Butter Beans', quantity: 400, unit: 'g' },
+    { name: 'Haricot Beans', quantity: 400, unit: 'g' },
+    { name: 'Four Bean Mix', quantity: 420, unit: 'g' },
+    { name: 'Refried Beans', quantity: 400, unit: 'g' },
+    { name: 'Lentils', quantity: 400, unit: 'g' },
+    { name: 'Corn', quantity: 410, unit: 'g' },
+    { name: 'Creamed Corn', quantity: 410, unit: 'g' },
+    { name: 'Beetroot', quantity: 450, unit: 'g' },
+    { name: 'Tinned Peaches', base: 'Peaches', quantity: 410, unit: 'g' },
+    { name: 'Tinned Fruit Salad', base: 'Fruit Salad', quantity: 410, unit: 'g' },
+    { name: 'Tuna', quantity: 185, unit: 'g' },
+    { name: 'Tinned Salmon', base: 'Salmon', quantity: 210, unit: 'g' },
+    { name: 'Coconut Cream', quantity: 400, unit: 'ml' },
+    { name: 'Coconut Milk', quantity: 400, unit: 'ml' },
+    { name: 'Evaporated Milk', quantity: 375, unit: 'ml' },
+    { name: 'Sweetened Condensed Milk', quantity: 395, unit: 'g' }
+];
+
+// -------------------------------------------------------------
+// Adds "Tinned X", "Canned X", "Tin of X" and "Can of X" as aliases
+// for every tinned good above, so however you word it - "Tin of
+// chickpeas", "Canned chickpeas", "Tinned chickpeas" - it all counts
+// as the same thing. Anything already in BUILT_IN_ALIASES is left
+// exactly as it is.
+// -------------------------------------------------------------
+const TIN_PREFIXES = ['Tinned', 'Canned', 'Tin Of', 'Tins Of', 'Can Of', 'Cans Of'];
+
+TINNED_GOODS.forEach(good => {
+    TIN_PREFIXES.forEach(prefix => {
+        const alias = `${prefix} ${good.base || good.name}`;
+        if (alias !== good.name && !(alias in BUILT_IN_ALIASES)) {
+            BUILT_IN_ALIASES[alias] = good.name;
+        }
+    });
+});
+
+module.exports = { BUILT_IN_ALIASES, EXTRA_INGREDIENT_NAMES, TINNED_GOODS, DEFAULT_TIN_SIZE };

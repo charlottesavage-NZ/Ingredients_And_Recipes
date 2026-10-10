@@ -59,6 +59,10 @@
                         <option value="ml">millilitres (mL)</option>
                         <option value="l">litres (L)</option>
                         <option value="each">each</option>
+                        <!-- Tins get turned into their weight by the server (e.g.
+                             1 tin of tomatoes = 400 g) - see TINNED_GOODS in
+                             ingredient-data.js for the sizes. -->
+                        <option value="tin">tins</option>
                     </select>
 
                     <!-- This dropdown lets me choose where the item is stored in the house.

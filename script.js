@@ -167,6 +167,13 @@ function setupInventory(sectionName) {
             // Set the text inside the <li> to show name, quantity, and unit
             li.textContent = `${item.name} — ${display.quantity} ${display.unit}`;
 
+            // Tinned goods also show how many tins that works out to,
+            // e.g. "Tinned Tomatoes — 4 kg (10 tins)". The server adds
+            // the "tins" count - see addTinCounts() in server.js.
+            if (item.tins) {
+                li.textContent += ` (${item.tins} ${item.tins === 1 ? 'tin' : 'tins'})`;
+            }
+
             // Add the <li> to the list in the HTML
             list.appendChild(li);
         });

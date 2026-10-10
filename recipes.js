@@ -81,12 +81,32 @@ function isSpoonMeasure(unit) {
     return SPOON_UNITS.includes(unit);
 }
 
-function toBaseUnit(quantity, unit) {
+// -------------------------------------------------------------
+// Tin sizes, loaded from the server (see TINNED_GOODS in
+// ingredient-data.js) - e.g. "baked bean" -> 420 g. Anything not in
+// the list counts as defaultTinSize (a standard 400 g tin).
+// -------------------------------------------------------------
+let tinSizes = new Map();
+let defaultTinSize = { quantity: 400, unit: 'g' };
+
+// How big one tin of this ingredient is, going through the alias
+// list first so "Tin of chickpeas" finds the Chickpeas size.
+function tinSizeFor(name) {
+    return tinSizes.get(resolveIngredientName(name || '', aliasLookup)) || defaultTinSize;
+}
+
+// "name" is only needed for tins, so the right tin size can be
+// looked up (e.g. 2 tins of baked beans = 840 g).
+function toBaseUnit(quantity, unit, name) {
     if (unit in WEIGHT_UNITS_TO_GRAMS) {
         return { quantity: quantity * WEIGHT_UNITS_TO_GRAMS[unit], unit: 'g' };
     }
     if (unit in VOLUME_UNITS_TO_ML) {
         return { quantity: quantity * VOLUME_UNITS_TO_ML[unit], unit: 'ml' };
+    }
+    if (unit === 'tin') {
+        const tin = tinSizeFor(name);
+        return { quantity: quantity * tin.quantity, unit: tin.unit };
     }
     // "each" (or anything else) can't be converted - just pass through
     return { quantity, unit };
@@ -204,7 +224,7 @@ function checkRecipeAvailability(recipe, inventory, aliases) {
     const missing = [];
 
     recipe.ingredients.forEach(ing => {
-        const needed = toBaseUnit(Number(ing.quantity), ing.unit);
+        const needed = toBaseUnit(Number(ing.quantity), ing.unit, ing.ingredient_name);
 
         // Resolve the recipe's ingredient name to its canonical form
         // first (e.g. "Beef Mince" -> "Mince"), so it's compared on
@@ -246,6 +266,14 @@ function checkRecipeAvailability(recipe, inventory, aliases) {
         const have = matches.reduce((total, item) => total + Number(item.quantity), 0);
 
         if (have < needed.quantity) {
+            // Recipes that ask for tins get told the shortfall in whole
+            // tins too ("need 1 more tin"), rather than in grams.
+            if (ing.unit === 'tin') {
+                const tinsShort = Math.ceil((needed.quantity - have) / tinSizeFor(ing.ingredient_name).quantity);
+                missing.push(`${ing.ingredient_name} (need ${tinsShort} more ${tinsShort === 1 ? 'tin' : 'tins'})`);
+                return;
+            }
+
             const shortfall = formatQuantity(needed.quantity - have, needed.unit);
             missing.push(`${ing.ingredient_name} (need ${shortfall.quantity} more ${shortfall.unit})`);
         }
@@ -448,6 +476,7 @@ function addIngredientRow(existing = null) {
             <option value="tsp">Teaspoons (tsp)</option>
             <option value="tbsp">Tablespoons (tbsp)</option>
             <option value="each">each</option>
+            <option value="tin">tins</option>
         </select>
     `;
 
@@ -547,10 +576,16 @@ function parseRecipeFile(fileText) {
 
     const ingredients = ingredientLines.map(line => {
         const [ingName, quantity, unit] = line.split(',').map(part => part.trim());
+        let cleanUnit = (unit || 'g').toLowerCase();
+
+        // "tins", "can" and "cans" in a file all mean the same "tin"
+        // unit as the dropdown uses.
+        if (['tins', 'can', 'cans'].includes(cleanUnit)) cleanUnit = 'tin';
+
         return {
             ingredient_name: ingName || '',
             quantity: quantity || '',
-            unit: (unit || 'g').toLowerCase()
+            unit: cleanUnit
         };
     });
 
@@ -596,9 +631,15 @@ function loadEverything() {
         fetch(`${SERVER_URL}/recipes`).then(r => r.json()),
         fetch(`${SERVER_URL}/inventory-all`).then(r => r.json()),
         fetch(`${SERVER_URL}/household-members`).then(r => r.json()),
-        fetch(`${SERVER_URL}/ingredient-aliases`).then(r => r.json())
+        fetch(`${SERVER_URL}/ingredient-aliases`).then(r => r.json()),
+        fetch(`${SERVER_URL}/tinned-goods`).then(r => r.json())
     ])
-        .then(([recipes, inventory, people, aliases]) => {
+        .then(([recipes, inventory, people, aliases, tinnedGoods]) => {
+            // Tin sizes, so recipes asking for "1 tin" can be compared
+            // against stock held in grams - see tinSizeFor().
+            tinSizes = new Map(tinnedGoods.goods.map(g => [g.key, { quantity: g.quantity, unit: g.unit }]));
+            defaultTinSize = tinnedGoods.defaultSize;
+
             currentRecipes = recipes;
             currentHouseholdMembers = people;
             currentAliases = aliases;
@@ -700,7 +741,7 @@ function renderRecipes(recipes) {
 
         // Turn the ingredients array into a simple bullet list of text
         const ingredientsHTML = recipe.ingredients
-            .map(ing => `<li>${escapeHtml(ing.ingredient_name)} — ${escapeHtml(ing.quantity)} ${escapeHtml(ing.unit)}</li>`)
+            .map(ing => `<li>${escapeHtml(ing.ingredient_name)} — ${escapeHtml(ing.quantity)} ${escapeHtml(ing.unit === 'tin' && Number(ing.quantity) !== 1 ? 'tins' : ing.unit)}</li>`)
             .join('');
 
         const availability = checkRecipeAvailability(recipe, currentInventory, aliasLookup);
@@ -850,7 +891,7 @@ function describeAmount(quantity, unit) {
 }
 
 // Display names for each unit inside the pop-up's amount boxes.
-const UNIT_LABELS = { g: 'g', kg: 'kg', ml: 'mL', l: 'L', each: 'each' };
+const UNIT_LABELS = { g: 'g', kg: 'kg', ml: 'mL', l: 'L', each: 'each', tin: 'tins' };
 
 // The pop-up's pieces (see the <dialog> in recipes.html).
 const madeDialog = document.getElementById('made-dialog');
@@ -895,14 +936,23 @@ function describeMadeRow(deduction, typedAmount) {
 
     // Convert what's typed (e.g. 1.5 "kg") into the same base unit
     // the house stock is counted in (grams), so they can be compared.
-    const typedInBase = toBaseUnit(Number(typedAmount) || 0, deduction.recipeUnit).quantity;
+    const typedInBase = toBaseUnit(Number(typedAmount) || 0, deduction.recipeUnit, deduction.ingredient).quantity;
 
     // Only mention the stored name if it's worded differently from
     // the recipe (e.g. recipe says "Ground beef", fridge says "Mince").
-    const places = deduction.foundIn.map(f => {
-        const storedAs = f.item.toLowerCase() === deduction.ingredient.toLowerCase() ? '' : ` ("${f.item}")`;
-        return SECTION_LABELS[f.section] + storedAs;
+    // Grouped by storage area, so two matching items in the same
+    // place read as 'Pantry ("Diced Tomatoes", "Tinned Tomatoes")'
+    // rather than "Pantry, then Pantry".
+    const namesBySection = new Map();
+    deduction.foundIn.forEach(f => {
+        if (!namesBySection.has(f.section)) namesBySection.set(f.section, []);
+        if (f.item.toLowerCase() !== deduction.ingredient.toLowerCase()) {
+            namesBySection.get(f.section).push(`"${f.item}"`);
+        }
     });
+    const places = [...namesBySection].map(([section, names]) =>
+        SECTION_LABELS[section] + (names.length ? ` (${names.join(', ')})` : '')
+    );
     const fromText = 'From: ' + places.join(', then ');
 
     if (typedInBase > deduction.available) {

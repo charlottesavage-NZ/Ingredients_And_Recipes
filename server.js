@@ -15,7 +15,7 @@ const { TRENTS_USERNAME, TRENTS_PASSWORD } = require('./credentials');
 
 // The big built-in ingredient list and US -> NZ name aliases (e.g.
 // "Ground Beef" -> "Mince") - see ingredient-data.js for the details.
-const { BUILT_IN_ALIASES, EXTRA_INGREDIENT_NAMES } = require('./ingredient-data');
+const { BUILT_IN_ALIASES, EXTRA_INGREDIENT_NAMES, TINNED_GOODS, DEFAULT_TIN_SIZE } = require('./ingredient-data');
 
 const PORT = 3000;
 
@@ -700,6 +700,54 @@ function normalizeIngredientName(name) {
 }
 
 // -------------------------------------------------------------
+// TINS AS A UNIT. A tin is never stored as "tins" - it's turned
+// into its weight/volume (e.g. 1 tin of tomatoes = 400 g) as soon as
+// it's entered, using the sizes in TINNED_GOODS (ingredient-data.js).
+// Anything not in that list counts as a standard 400 g tin.
+// -------------------------------------------------------------
+const TIN_UNITS = ['tin', 'tins', 'can', 'cans'];
+
+function isTinUnit(unit) {
+    return TIN_UNITS.includes(String(unit).toLowerCase());
+}
+
+// Tin sizes looked up by the tidied-up name (see normalizeIngredientName).
+const TIN_SIZE_BY_KEY = new Map(
+    TINNED_GOODS.map(good => [normalizeIngredientName(good.name), { quantity: good.quantity, unit: good.unit }])
+);
+
+// How big one tin of this item is. Goes through the alias list
+// first, so "Diced Tomatoes" or "Tin of chickpeas" find the right
+// size too.
+function tinSizeFor(name, aliasLookup) {
+    return TIN_SIZE_BY_KEY.get(canonicalKey(name, aliasLookup)) || DEFAULT_TIN_SIZE;
+}
+
+// Whether something counts as a tinned good, for showing a tin count
+// on the Inventory page - either it's in the tinned goods list, or
+// its name says so ("Tinned...", "Canned...", "Tin of...").
+function isTinnedGood(name, aliasLookup) {
+    return TIN_SIZE_BY_KEY.has(canonicalKey(name, aliasLookup)) || /\b(tinned|canned|tins? of|cans? of)\b/i.test(name);
+}
+
+// -------------------------------------------------------------
+// Adds a "tins" count to tinned goods before they're sent to the
+// page, e.g. 4000 g of Tinned Tomatoes gets tins: 10, which the
+// Inventory page shows as "4 kg (10 tins)". Only added to the copy
+// that's SENT - it's never saved into the CSV.
+// -------------------------------------------------------------
+function addTinCounts(items, aliasLookup) {
+    return items.map(item => {
+        if (!isTinnedGood(item.name, aliasLookup)) return item;
+
+        const tin = tinSizeFor(item.name, aliasLookup);
+        if (item.unit !== tin.unit) return item;
+
+        return { ...item, tins: Math.round((Number(item.quantity) / tin.quantity) * 10) / 10 };
+    });
+}
+
+// -------------------------------------------------------------
 // Reads all four storage areas as SEPARATE lists, e.g.
 // { fridge: [...], pantry: [...], ... }. Unlike readAllInventory(),
 // nothing is merged together, because we need to know exactly
@@ -763,6 +811,11 @@ function planRecipeDeduction(recipe, itemsBySection, aliasLookup) {
         } else if (isVolumeUnit(unit)) {
             quantity = toMilliliters(quantity, unit);
             unit = 'ml';
+        } else if (isTinUnit(unit)) {
+            // "1 tin chickpeas" -> 400 g, using the tin size table.
+            const tin = tinSizeFor(ing.ingredient_name, aliasLookup);
+            quantity = quantity * tin.quantity;
+            unit = tin.unit;
         } else if (unit === 'each') {
             quantity = Math.floor(quantity);
             if (quantity === 0) {
@@ -1580,6 +1633,20 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // ---- Tin sizes, so the Recipes page can work out tins too ----
+    // e.g. { defaultSize: {400 g}, goods: [{ key: "baked bean", quantity: 420, unit: "g" }, ...] }
+    if (req.url === '/tinned-goods' && req.method === 'GET') {
+        sendJson(res, {
+            defaultSize: DEFAULT_TIN_SIZE,
+            goods: TINNED_GOODS.map(good => ({
+                key: normalizeIngredientName(good.name),
+                quantity: good.quantity,
+                unit: good.unit
+            }))
+        });
+        return;
+    }
+
     // ---- All known ingredient aliases ----
     // (yours AND the built-in ones - see readAllAliases)
     if (req.url === '/ingredient-aliases' && req.method === 'GET') {
@@ -1626,17 +1693,35 @@ const server = http.createServer((req, res) => {
     }
 
     // ---- GET: return this section's items ----
+    // (with a tin count added to tinned goods - see addTinCounts)
     if (req.method === 'GET') {
         readItems(section, (err, items) => {
             if (err) return sendText(res, 500, 'Could not read ' + csvFiles[section]);
-            sendJson(res, items);
+
+            readAllAliases((err, aliases) => {
+                if (err) return sendText(res, 500, 'Could not read ingredient aliases');
+                sendJson(res, addTinCounts(items, buildAliasLookup(aliases)));
+            });
         });
         return;
     }
 
     // ---- POST: add/update an item, save, return the updated list ----
     if (req.method === 'POST') {
-        readJsonBody(req, res, newItem => runOneAtATime(res, () => {
+        readJsonBody(req, res, newItem => runOneAtATime(res, () => readAllAliases((err, aliases) => {
+            if (err) return sendText(res, 500, 'Could not read ingredient aliases');
+            const aliasLookup = buildAliasLookup(aliases);
+
+            // If this item was entered in TINS, turn it into its weight
+            // (or volume) right away - e.g. 10 tins of tomatoes becomes
+            // 4000 g - so it merges with anything already stored in
+            // grams. See TINNED_GOODS in ingredient-data.js for sizes.
+            if (isTinUnit(newItem.unit)) {
+                const tin = tinSizeFor(newItem.name, aliasLookup);
+                newItem.quantity = Number(newItem.quantity) * tin.quantity;
+                newItem.unit = tin.unit;
+            }
+
             // If this item is weight-based (g or kg), convert it to grams
             // right away. That way everything stored is in one consistent
             // unit, and "10kg" + "500g" merge correctly instead of being
@@ -1678,10 +1763,10 @@ const server = http.createServer((req, res) => {
 
                 saveItems(section, items, (err) => {
                     if (err) return sendText(res, 500, 'Could not save ' + csvFiles[section]);
-                    sendJson(res, items);
+                    sendJson(res, addTinCounts(items, aliasLookup));
                 });
             });
-        }));
+        })));
         return;
     }
 
