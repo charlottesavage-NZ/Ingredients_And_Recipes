@@ -503,50 +503,58 @@ async function searchWoolworths(searchTerm, storeName) {
     // Visible (non-headless) browser - Woolworths' bot protection
     // is more likely to block an invisible one.
     const browser = await chromium.launch({ headless: false });
-    const context = await browser.newContext();
 
-    // Set the store cookie BEFORE the browser ever visits the site,
-    // so it behaves like a returning visitor who already picked
-    // this specific store - same trick we worked out originally.
-    await context.addCookies([
-        {
-            name: 'cw-lrkswrdjp',
-            value: storeCookie,
-            domain: 'www.woolworths.co.nz',
-            path: '/'
-        }
-    ]);
+    // try/finally makes sure the browser ALWAYS gets closed, even if
+    // the search times out or throws - otherwise every failed search
+    // leaves a whole Chromium window running on the server forever.
+    let data;
+    try {
+        const context = await browser.newContext();
 
-    const page = await context.newPage();
-    await page.goto('https://www.woolworths.co.nz/');
-    await page.waitForTimeout(2000);
+        // Set the store cookie BEFORE the browser ever visits the site,
+        // so it behaves like a returning visitor who already picked
+        // this specific store - same trick we worked out originally.
+        await context.addCookies([
+            {
+                name: 'cw-lrkswrdjp',
+                value: storeCookie,
+                domain: 'www.woolworths.co.nz',
+                path: '/'
+            }
+        ]);
 
-    // Wait specifically for the search response, don't just hope
-    // we're fast enough to catch it in the background.
-    // The home page ALSO sends a ProductSearch request by itself
-    // (it loads a product group, not a keyword search), so matching
-    // the address alone would catch the wrong one. Every real search
-    // request contains "byKeyword" in its body, so we check for that
-    // too, which makes sure we catch the response to OUR search.
-    const [response] = await Promise.all([
-        page.waitForResponse(
-            r => r.url().includes('/api/graphql?op-name=ProductSearch') &&
-                 (r.request().postData() || '').includes('"byKeyword"'),
-            { timeout: 15000 }
-        ),
-        (async () => {
-            await page.fill("input[type='search']", searchTerm);
-            // Give the site's own autocomplete dropdown a moment to
-            // finish loading before we press Enter - pressing it too
-            // early risks the dropdown's own JS swallowing the
-            // keypress before the real search fires.
-            await page.waitForTimeout(1500);
-            await page.keyboard.press('Enter');
-        })()
-    ]);
+        const page = await context.newPage();
+        await page.goto('https://www.woolworths.co.nz/');
+        await page.waitForTimeout(2000);
 
-    const data = await response.json();
-    await browser.close();
+        // Wait specifically for the search response, don't just hope
+        // we're fast enough to catch it in the background.
+        // The home page ALSO sends a ProductSearch request by itself
+        // (it loads a product group, not a keyword search), so matching
+        // the address alone would catch the wrong one. Every real search
+        // request contains "byKeyword" in its body, so we check for that
+        // too, which makes sure we catch the response to OUR search.
+        const [response] = await Promise.all([
+            page.waitForResponse(
+                r => r.url().includes('/api/graphql?op-name=ProductSearch') &&
+                     (r.request().postData() || '').includes('"byKeyword"'),
+                { timeout: 15000 }
+            ),
+            (async () => {
+                await page.fill("input[type='search']", searchTerm);
+                // Give the site's own autocomplete dropdown a moment to
+                // finish loading before we press Enter - pressing it too
+                // early risks the dropdown's own JS swallowing the
+                // keypress before the real search fires.
+                await page.waitForTimeout(1500);
+                await page.keyboard.press('Enter');
+            })()
+        ]);
+
+        data = await response.json();
+    } finally {
+        await browser.close();
+    }
 
     // The list of results now lives at data.My.products.results.
     // The "(x && x.y)" checks stop the code crashing if any part of
@@ -612,79 +620,85 @@ async function searchPakNSave(searchTerm, storeName) {
     const storeId = PAKNSAVE_STORES[chosenStore];
 
     const browser = await chromium.launch({ headless: false });
-    const context = await browser.newContext();
 
-    // Pak'nSave remembers your chosen store across TWO cookies
-    // together, rather than Woolworths' single one. Set before the
-    // site ever loads, same reasoning as before.
-    await context.addCookies([
-        {
-            name: 'eCom_STORE_ID',
-            value: storeId,
-            domain: 'www.paknsave.co.nz',
-            path: '/'
-        },
-        {
-            name: 'STORE_ID_V2',
-            value: `${storeId}|False`,
-            domain: 'www.paknsave.co.nz',
-            path: '/'
-        }
-    ]);
+    // Always close the browser, even on a timeout/error - see
+    // searchWoolworths() above.
+    let data;
+    try {
+        const context = await browser.newContext();
 
-    const page = await context.newPage();
+        // Pak'nSave remembers your chosen store across TWO cookies
+        // together, rather than Woolworths' single one. Set before the
+        // site ever loads, same reasoning as before.
+        await context.addCookies([
+            {
+                name: 'eCom_STORE_ID',
+                value: storeId,
+                domain: 'www.paknsave.co.nz',
+                path: '/'
+            },
+            {
+                name: 'STORE_ID_V2',
+                value: `${storeId}|False`,
+                domain: 'www.paknsave.co.nz',
+                path: '/'
+            }
+        ]);
 
-    // Pak'nSave's site asks the browser for your location. With a
-    // real, visible browser, that shows an actual popup that just
-    // sits there waiting for someone to click something - which
-    // would stall the whole search. This runs BEFORE any of the
-    // site's own code, replacing the location API with a version
-    // that immediately says "no" on its own, so the real popup
-    // never gets a chance to appear at all.
-    await page.addInitScript(() => {
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition = (success, error) => {
-                if (error) error({ code: 1, message: 'User denied Geolocation' });
-            };
-            navigator.geolocation.watchPosition = (success, error) => {
-                if (error) error({ code: 1, message: 'User denied Geolocation' });
-                return 0;
-            };
-        }
-    });
+        const page = await context.newPage();
 
-    // Loading the homepage first lets the site's own JavaScript do
-    // two things we can't fake ourselves: solve Cloudflare's bot
-    // check (earning a valid cf_clearance cookie) and set up its
-    // own short-lived anonymous session token, used to authorize
-    // the product-price request below.
-    await page.goto('https://www.paknsave.co.nz/');
-    await page.waitForTimeout(3000);
+        // Pak'nSave's site asks the browser for your location. With a
+        // real, visible browser, that shows an actual popup that just
+        // sits there waiting for someone to click something - which
+        // would stall the whole search. This runs BEFORE any of the
+        // site's own code, replacing the location API with a version
+        // that immediately says "no" on its own, so the real popup
+        // never gets a chance to appear at all.
+        await page.addInitScript(() => {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition = (success, error) => {
+                    if (error) error({ code: 1, message: 'User denied Geolocation' });
+                };
+                navigator.geolocation.watchPosition = (success, error) => {
+                    if (error) error({ code: 1, message: 'User denied Geolocation' });
+                    return 0;
+                };
+            }
+        });
 
-    // Found via Inspect Element on the real site - this input has
-    // a proper id, so we can target it exactly rather than guessing.
-    const [response] = await Promise.all([
-        page.waitForResponse(
-            r => r.url().includes('/v1/edge/search/paginated/products') && r.request().method() === 'POST',
-            { timeout: 20000 }
-        ),
-        (async () => {
-            await page.fill("#search-bar-desktop", searchTerm);
-            await page.waitForTimeout(1500);
-            await page.keyboard.press('Enter');
-        })()
-    ]);
+        // Loading the homepage first lets the site's own JavaScript do
+        // two things we can't fake ourselves: solve Cloudflare's bot
+        // check (earning a valid cf_clearance cookie) and set up its
+        // own short-lived anonymous session token, used to authorize
+        // the product-price request below.
+        await page.goto('https://www.paknsave.co.nz/');
+        await page.waitForTimeout(3000);
 
-    const data = await response.json();
+        // Found via Inspect Element on the real site - this input has
+        // a proper id, so we can target it exactly rather than guessing.
+        const [response] = await Promise.all([
+            page.waitForResponse(
+                r => r.url().includes('/v1/edge/search/paginated/products') && r.request().method() === 'POST',
+                { timeout: 20000 }
+            ),
+            (async () => {
+                await page.fill("#search-bar-desktop", searchTerm);
+                await page.waitForTimeout(1500);
+                await page.keyboard.press('Enter');
+            })()
+        ]);
 
-    // Reads back which store ID actually went out in the request
-    // itself - lets us directly confirm the two cookies above
-    // worked, rather than just hoping they did.
-    const requestBody = response.request().postDataJSON();
-    const storeIdUsed = requestBody ? requestBody.storeId : null;
-    console.log(`Pak'nSave store ID used: ${storeIdUsed}`);
+        data = await response.json();
 
-    await browser.close();
+        // Reads back which store ID actually went out in the request
+        // itself - lets us directly confirm the two cookies above
+        // worked, rather than just hoping they did.
+        const requestBody = response.request().postDataJSON();
+        const storeIdUsed = requestBody ? requestBody.storeId : null;
+        console.log(`Pak'nSave store ID used: ${storeIdUsed}`);
+    } finally {
+        await browser.close();
+    }
 
     const products = data.products || [];
 
@@ -722,52 +736,58 @@ async function searchPakNSave(searchTerm, storeName) {
 // -------------------------------------------------------------
 async function searchTrents(searchTerm) {
     const browser = await chromium.launch({ headless: false });
-    const context = await browser.newContext();
-    const page = await context.newPage();
 
-    await page.goto('https://online.trents.co.nz/');
-    await page.waitForTimeout(2000);
+    // Always close the browser, even on a timeout/error - see
+    // searchWoolworths() above.
+    let rawProducts;
+    try {
+        const context = await browser.newContext();
+        const page = await context.newPage();
 
-    // Target by "name" rather than "id" - the real ids have colons
-    // in them (tcc_sitelogin:loginForm:username), which CSS
-    // selectors treat as special characters.
-    await page.fill('input[name="tcc_sitelogin:loginForm:username"]', TRENTS_USERNAME);
-    await page.fill('input[name="tcc_sitelogin:loginForm:password"]', TRENTS_PASSWORD);
-    await page.keyboard.press('Enter');
+        await page.goto('https://online.trents.co.nz/');
+        await page.waitForTimeout(2000);
 
-    // Login goes through a Salesforce handoff page (frontdoor.jsp)
-    // that redirects itself on to the real homepage - wait
-    // specifically for that, rather than guessing how long it takes.
-    await page.waitForURL('**/ccrz__HomePage**', { timeout: 15000 });
-    await page.waitForLoadState('networkidle');
+        // Target by "name" rather than "id" - the real ids have colons
+        // in them (tcc_sitelogin:loginForm:username), which CSS
+        // selectors treat as special characters.
+        await page.fill('input[name="tcc_sitelogin:loginForm:username"]', TRENTS_USERNAME);
+        await page.fill('input[name="tcc_sitelogin:loginForm:password"]', TRENTS_PASSWORD);
+        await page.keyboard.press('Enter');
 
-    await page.fill('#searchText', searchTerm);
-    await page.click('#doSearch');
+        // Login goes through a Salesforce handoff page (frontdoor.jsp)
+        // that redirects itself on to the real homepage - wait
+        // specifically for that, rather than guessing how long it takes.
+        await page.waitForURL('**/ccrz__HomePage**', { timeout: 15000 });
+        await page.waitForLoadState('networkidle');
 
-    await page.waitForURL('**/ccrz__ProductList**', { timeout: 15000 });
-    await page.waitForLoadState('networkidle');
+        await page.fill('#searchText', searchTerm);
+        await page.click('#doSearch');
 
-    // Runs INSIDE the browser page itself, against every product
-    // tile on the results page - reads name, price, and pack size
-    // straight out of the rendered HTML.
-    const rawProducts = await page.$$eval('.cc_product_item', items => {
-        return items.map(item => {
-            const name = item.querySelector('.cc_product_name')?.textContent.trim() || null;
-            const size = item.querySelector('.cc_product_uom')?.textContent.trim() || null;
+        await page.waitForURL('**/ccrz__ProductList**', { timeout: 15000 });
+        await page.waitForLoadState('networkidle');
 
-            // The price element's text includes the "/ Carton" or
-            // "/ Each" span text glued on the end (e.g. "$22.11/
-            // Carton"), so pull just the $ amount out with a pattern
-            // match rather than trying to separate the text nodes.
-            const priceBlock = item.querySelector('.product-list-price')?.textContent || '';
-            const priceMatch = priceBlock.match(/\$([\d.]+)/);
-            const price = priceMatch ? Number(priceMatch[1]) : null;
+        // Runs INSIDE the browser page itself, against every product
+        // tile on the results page - reads name, price, and pack size
+        // straight out of the rendered HTML.
+        rawProducts = await page.$$eval('.cc_product_item', items => {
+            return items.map(item => {
+                const name = item.querySelector('.cc_product_name')?.textContent.trim() || null;
+                const size = item.querySelector('.cc_product_uom')?.textContent.trim() || null;
 
-            return { name, size, price };
+                // The price element's text includes the "/ Carton" or
+                // "/ Each" span text glued on the end (e.g. "$22.11/
+                // Carton"), so pull just the $ amount out with a pattern
+                // match rather than trying to separate the text nodes.
+                const priceBlock = item.querySelector('.product-list-price')?.textContent || '';
+                const priceMatch = priceBlock.match(/\$([\d.]+)/);
+                const price = priceMatch ? Number(priceMatch[1]) : null;
+
+                return { name, size, price };
+            });
         });
-    });
-
-    await browser.close();
+    } finally {
+        await browser.close();
+    }
 
     // Reshape into the SAME shape searchWoolworths()/searchPakNSave()
     // return, so the price checker page doesn't need to know or care
@@ -831,606 +851,628 @@ function saveAliases(aliases, callback) {
     fs.writeFile(ALIASES_FILE, stringifyGenericCSV(ALIAS_HEADERS, aliases), 'utf8', callback);
 }
 
-const server = http.createServer((req, res) => {
-
-    // Parsed once here so any route below can read query string
-    // values (e.g. ?item=mince) via parsedUrl.searchParams, on top
-    // of the existing plain req.url string matching other routes
-    // already use.
-    const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
-
-    // Let the browser talk to this server from a file:// page.
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-    // Browsers sometimes send a quick permission check ("OPTIONS")
-    // before the real request - just say "yes, go ahead."
-    if (req.method === 'OPTIONS') {
-        res.writeHead(204);
-        res.end();
-        return;
-    }
-
-    // ---- Combined store list for the dropdown - one list on the ----
-    // ---- page, even though Woolworths and Pak'nSave are handled ----
-    // ---- completely separately behind the scenes. ----
-    if (parsedUrl.pathname === '/stores' && req.method === 'GET') {
-        const allStoreNames = [
-            ...Object.keys(WOOLWORTHS_STORES),
-            ...Object.keys(PAKNSAVE_STORES),
-            TRENTS_STORE_NAME
-        ];
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(allStoreNames));
-        return;
-    }
-
-    // ---- PRICE CHECKER: live search, routed to whichever ----
-    // ---- retailer the chosen store actually belongs to ----
-    // Has to be checked BEFORE the pantry/fridge/freezer/chest
-    // routing below, same reasoning as the recipes routes.
-    if (parsedUrl.pathname === '/price-search' && req.method === 'GET') {
-        const searchTerm = parsedUrl.searchParams.get('item');
-        const storeName = parsedUrl.searchParams.get('store');
-
-        if (!searchTerm) {
+// -------------------------------------------------------------
+// Reads JSON out of a request body. If the body isn't valid JSON,
+// this sends back a 400 error itself and returns null - without
+// this, one bad request would throw inside the 'end' handler and
+// crash (and stop) the whole server.
+// -------------------------------------------------------------
+function parseJsonBody(body, res) {
+    try {
+            return JSON.parse(body);
+        } catch (err) {
             res.writeHead(400, { 'Content-Type': 'text/plain' });
-            res.end('Missing ?item= search term');
+            res.end('Invalid JSON in request body');
+            return null;
+        }
+    }
+
+    const server = http.createServer((req, res) => {
+
+        // Parsed once here so any route below can read query string
+        // values (e.g. ?item=mince) via parsedUrl.searchParams, on top
+        // of the existing plain req.url string matching other routes
+        // already use.
+        const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
+
+        // Let the browser talk to this server from a file:// page.
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+        // Browsers sometimes send a quick permission check ("OPTIONS")
+        // before the real request - just say "yes, go ahead."
+        if (req.method === 'OPTIONS') {
+            res.writeHead(204);
+            res.end();
             return;
         }
 
-        // The dropdown is one combined list, but each store name
-        // still tells us which retailer's scraper to actually run.
-        const isPakNSaveStore = Object.prototype.hasOwnProperty.call(PAKNSAVE_STORES, storeName);
-        const isTrentsStore = storeName === TRENTS_STORE_NAME;
-
-        let searchPromise;
-        if (isTrentsStore) {
-            searchPromise = searchTrents(searchTerm);
-        } else if (isPakNSaveStore) {
-            searchPromise = searchPakNSave(searchTerm, storeName);
-        } else {
-            searchPromise = searchWoolworths(searchTerm, storeName);
+        // ---- Combined store list for the dropdown - one list on the ----
+        // ---- page, even though Woolworths and Pak'nSave are handled ----
+        // ---- completely separately behind the scenes. ----
+        if (parsedUrl.pathname === '/stores' && req.method === 'GET') {
+            const allStoreNames = [
+                ...Object.keys(WOOLWORTHS_STORES),
+                ...Object.keys(PAKNSAVE_STORES),
+                TRENTS_STORE_NAME
+            ];
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(allStoreNames));
+            return;
         }
 
-        searchPromise
-            .then(results => {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(results));
-            })
-            .catch(err => {
-                console.error('Price search failed:', err);
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Could not complete the price search - Woolworths may be slow to respond, or their site has changed. Try again in a moment.');
-            });
-        return;
-    }
+        // ---- PRICE CHECKER: live search, routed to whichever ----
+        // ---- retailer the chosen store actually belongs to ----
+        // Has to be checked BEFORE the pantry/fridge/freezer/chest
+        // routing below, same reasoning as the recipes routes.
+        if (parsedUrl.pathname === '/price-search' && req.method === 'GET') {
+            const searchTerm = parsedUrl.searchParams.get('item');
+            const storeName = parsedUrl.searchParams.get('store');
 
-    // ---- Every price ever saved, for the history list on the page ----
-    if (parsedUrl.pathname === '/prices' && req.method === 'GET') {
-        readPrices((err, prices) => {
-            if (err) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Could not read price history');
+            if (!searchTerm) {
+                res.writeHead(400, { 'Content-Type': 'text/plain' });
+                res.end('Missing ?item= search term');
                 return;
             }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(prices));
-        });
-        return;
-    }
 
-    // ---- Save ONE specific search result into the price history ----
-    if (parsedUrl.pathname === '/prices' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-            const newPrice = JSON.parse(body);
+            // The dropdown is one combined list, but each store name
+            // still tells us which retailer's scraper to actually run.
+            const isPakNSaveStore = Object.prototype.hasOwnProperty.call(PAKNSAVE_STORES, storeName);
+            const isTrentsStore = storeName === TRENTS_STORE_NAME;
 
+            let searchPromise;
+            if (isTrentsStore) {
+                searchPromise = searchTrents(searchTerm);
+            } else if (isPakNSaveStore) {
+                searchPromise = searchPakNSave(searchTerm, storeName);
+            } else {
+                searchPromise = searchWoolworths(searchTerm, storeName);
+            }
+
+            searchPromise
+                .then(results => {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(results));
+                })
+                .catch(err => {
+                    console.error('Price search failed:', err);
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end(`Could not complete the price search - ${storeName || 'the store'} may be slow to respond, or their site has changed. Try again in a moment.`);
+                });
+            return;
+        }
+
+        // ---- Every price ever saved, for the history list on the page ----
+        if (parsedUrl.pathname === '/prices' && req.method === 'GET') {
             readPrices((err, prices) => {
                 if (err) {
                     res.writeHead(500, { 'Content-Type': 'text/plain' });
                     res.end('Could not read price history');
                     return;
                 }
-
-                // Every save is a NEW row - we're keeping full
-                // history, not overwriting a previous check of the
-                // same item.
-                const entry = {
-                    id: Date.now().toString(),
-                    item_name: newPrice.item_name,
-                    price: newPrice.price,
-                    cup_price: newPrice.cup_price,
-                    cup_measure: newPrice.cup_measure,
-                    package_size: newPrice.package_size,
-                    store: newPrice.store,
-                    date_checked: new Date().toISOString()
-                };
-
-                prices.push(entry);
-
-                savePrices(prices, (err) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not save price history');
-                        return;
-                    }
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(entry));
-                });
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(prices));
             });
-        });
-        return;
-    }
+            return;
+        }
 
-    // ---- RECIPES: separate logic since it's two linked files, not one ----
-    // This has to be checked BEFORE the pantry/fridge/freezer/chest
-    // routing below, since "recipes" isn't in csvFiles and would
-    // otherwise get rejected as an unknown section.
-    if (req.url === '/recipes' && req.method === 'GET') {
-        readRecipes((err, recipes) => {
-            if (err) {
-                console.error('Error reading recipes:', err);
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Could not read recipes');
-                return;
-            }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(recipes));
-        });
-        return;
-    }
+        // ---- Save ONE specific search result into the price history ----
+        if (parsedUrl.pathname === '/prices' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                const newPrice = parseJsonBody(body, res);
+                if (!newPrice) return;
 
-    if (req.url === '/recipes' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-            const newRecipe = JSON.parse(body);
-
-            // Generate a simple unique ID using the current timestamp.
-            // This avoids needing to track "the last ID used" ourselves.
-            const newId = Date.now().toString();
-
-            fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read recipes');
-                    return;
-                }
-
-                const recipes = parseCSV(recipesData);
-                recipes.push({
-                    id: newId,
-                    name: newRecipe.name,
-                    instructions: newRecipe.instructions
-                });
-
-                fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
+                readPrices((err, prices) => {
                     if (err) {
                         res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not read recipe ingredients');
+                        res.end('Could not read price history');
                         return;
                     }
 
-                    const ingredients = parseCSV(ingredientsData);
+                    // Every save is a NEW row - we're keeping full
+                    // history, not overwriting a previous check of the
+                    // same item.
+                    const entry = {
+                        id: Date.now().toString(),
+                        item_name: newPrice.item_name,
+                        price: newPrice.price,
+                        cup_price: newPrice.cup_price,
+                        cup_measure: newPrice.cup_measure,
+                        package_size: newPrice.package_size,
+                        store: newPrice.store,
+                        date_checked: new Date().toISOString()
+                    };
 
-                    // Add one row per ingredient, all linked to this recipe's id
-                    newRecipe.ingredients.forEach(ing => {
-                        ingredients.push({
-                            recipe_id: newId,
-                            ingredient_name: ing.name,
-                            quantity: ing.quantity,
-                            unit: ing.unit
-                        });
-                    });
+                    prices.push(entry);
 
-                    fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], recipes), 'utf8', (err) => {
+                    savePrices(prices, (err) => {
                         if (err) {
                             res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not save recipes');
+                            res.end('Could not save price history');
                             return;
                         }
-
-                        fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], ingredients), 'utf8', (err) => {
-                            if (err) {
-                                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                                res.end('Could not save recipe ingredients');
-                                return;
-                            }
-
-                            res.writeHead(200, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ id: newId, ...newRecipe }));
-                        });
-                    });
-                });
-            });
-        });
-        return;
-    }
-
-    // ---- PUT: update an existing recipe by id ----
-    // Same idea as POST (create), but instead of adding a new row,
-    // we replace the existing recipe's data and completely swap out
-    // its ingredient rows for the new set.
-    if (req.url.startsWith('/recipes/') && req.method === 'PUT') {
-        const recipeId = req.url.replace('/recipes/', '');
-
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-            const updatedRecipe = JSON.parse(body);
-
-            fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read recipes');
-                    return;
-                }
-
-                const recipes = parseCSV(recipesData);
-
-                // Find the recipe being edited and update its fields
-                // in place, keeping the same id.
-                const recipe = recipes.find(r => r.id === recipeId);
-                if (!recipe) {
-                    res.writeHead(404, { 'Content-Type': 'text/plain' });
-                    res.end('Recipe not found');
-                    return;
-                }
-                recipe.name = updatedRecipe.name;
-                recipe.instructions = updatedRecipe.instructions;
-
-                fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not read recipe ingredients');
-                        return;
-                    }
-
-                    const ingredients = parseCSV(ingredientsData);
-
-                    // Remove this recipe's OLD ingredient rows, then add
-                    // the new set. It's simpler and safer than trying to
-                    // match old ingredients to new ones one-by-one.
-                    const otherIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
-
-                    updatedRecipe.ingredients.forEach(ing => {
-                        otherIngredients.push({
-                            recipe_id: recipeId,
-                            ingredient_name: ing.name,
-                            quantity: ing.quantity,
-                            unit: ing.unit
-                        });
-                    });
-
-                    fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], recipes), 'utf8', (err) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not save recipes');
-                            return;
-                        }
-
-                        fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], otherIngredients), 'utf8', (err) => {
-                            if (err) {
-                                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                                res.end('Could not save recipe ingredients');
-                                return;
-                            }
-
-                            res.writeHead(200, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ id: recipeId, ...updatedRecipe }));
-                        });
-                    });
-                });
-            });
-        });
-        return;
-    }
-
-    // ---- DELETE a single recipe by id ----
-    // URL looks like /recipes/1234567890 - we need to pull the id
-    // out of the end of the URL.
-    if (req.url.startsWith('/recipes/') && req.method === 'DELETE') {
-        const recipeId = req.url.replace('/recipes/', '');
-
-        fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
-            if (err) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Could not read recipes');
-                return;
-            }
-
-            const recipes = parseCSV(recipesData);
-
-            // Keep every recipe EXCEPT the one being deleted
-            const remainingRecipes = recipes.filter(r => r.id !== recipeId);
-
-            fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read recipe ingredients');
-                    return;
-                }
-
-                const ingredients = parseCSV(ingredientsData);
-
-                // Also remove any ingredient rows that belonged to
-                // this recipe, otherwise they'd be orphaned - pointing
-                // to a recipe_id that no longer exists anywhere.
-                const remainingIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
-
-                fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], remainingRecipes), 'utf8', (err) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not save recipes');
-                        return;
-                    }
-
-                    fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], remainingIngredients), 'utf8', (err) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not save recipe ingredients');
-                            return;
-                        }
-
                         res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ deleted: recipeId }));
+                        res.end(JSON.stringify(entry));
                     });
                 });
             });
-        });
-        return;
-    }
+            return;
+        }
 
+        // ---- RECIPES: separate logic since it's two linked files, not one ----
+        // This has to be checked BEFORE the pantry/fridge/freezer/chest
+        // routing below, since "recipes" isn't in csvFiles and would
+        // otherwise get rejected as an unknown section.
+        if (req.url === '/recipes' && req.method === 'GET') {
+            readRecipes((err, recipes) => {
+                if (err) {
+                    console.error('Error reading recipes:', err);
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Could not read recipes');
+                    return;
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(recipes));
+            });
+            return;
+        }
 
-    // ---- List the household members who can vote ----
-    if (req.url === '/household-members' && req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(HOUSEHOLD_MEMBERS));
-        return;
-    }
+        if (req.url === '/recipes' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                const newRecipe = parseJsonBody(body, res);
+                if (!newRecipe) return;
 
-    // ---- Cast (or change) a vote on a recipe ----
-    // URL looks like /recipes/1234567890/votes
-    if (req.url.match(/^\/recipes\/[^/]+\/votes$/) && req.method === 'POST') {
-        const recipeId = req.url.split('/')[2];
+                // Generate a simple unique ID using the current timestamp.
+                // This avoids needing to track "the last ID used" ourselves.
+                const newId = Date.now().toString();
 
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-            const { person, vote } = JSON.parse(body);
+                fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
+                    if (err) {
+                        res.writeHead(500, { 'Content-Type': 'text/plain' });
+                        res.end('Could not read recipes');
+                        return;
+                    }
 
-            fs.readFile(RECIPE_VOTES_FILE, 'utf8', (err, votesData) => {
+                    const recipes = parseCSV(recipesData);
+                    recipes.push({
+                        id: newId,
+                        name: newRecipe.name,
+                        instructions: newRecipe.instructions
+                    });
+
+                    fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
+                        if (err) {
+                            res.writeHead(500, { 'Content-Type': 'text/plain' });
+                            res.end('Could not read recipe ingredients');
+                            return;
+                        }
+
+                        const ingredients = parseCSV(ingredientsData);
+
+                        // Add one row per ingredient, all linked to this recipe's id
+                        newRecipe.ingredients.forEach(ing => {
+                            ingredients.push({
+                                recipe_id: newId,
+                                ingredient_name: ing.name,
+                                quantity: ing.quantity,
+                                unit: ing.unit
+                            });
+                        });
+
+                        fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], recipes), 'utf8', (err) => {
+                            if (err) {
+                                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                                res.end('Could not save recipes');
+                                return;
+                            }
+
+                            fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], ingredients), 'utf8', (err) => {
+                                if (err) {
+                                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                                    res.end('Could not save recipe ingredients');
+                                    return;
+                                }
+
+                                res.writeHead(200, { 'Content-Type': 'application/json' });
+                                res.end(JSON.stringify({ id: newId, ...newRecipe }));
+                            });
+                        });
+                    });
+                });
+            });
+            return;
+        }
+
+        // ---- PUT: update an existing recipe by id ----
+        // Same idea as POST (create), but instead of adding a new row,
+        // we replace the existing recipe's data and completely swap out
+        // its ingredient rows for the new set.
+        if (req.url.startsWith('/recipes/') && req.method === 'PUT') {
+            const recipeId = req.url.replace('/recipes/', '');
+
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                const updatedRecipe = parseJsonBody(body, res);
+                if (!updatedRecipe) return;
+
+                fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
+                    if (err) {
+                        res.writeHead(500, { 'Content-Type': 'text/plain' });
+                        res.end('Could not read recipes');
+                        return;
+                    }
+
+                    const recipes = parseCSV(recipesData);
+
+                    // Find the recipe being edited and update its fields
+                    // in place, keeping the same id.
+                    const recipe = recipes.find(r => r.id === recipeId);
+                    if (!recipe) {
+                        res.writeHead(404, { 'Content-Type': 'text/plain' });
+                        res.end('Recipe not found');
+                        return;
+                    }
+                    recipe.name = updatedRecipe.name;
+                    recipe.instructions = updatedRecipe.instructions;
+
+                    fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
+                        if (err) {
+                            res.writeHead(500, { 'Content-Type': 'text/plain' });
+                            res.end('Could not read recipe ingredients');
+                            return;
+                        }
+
+                        const ingredients = parseCSV(ingredientsData);
+
+                        // Remove this recipe's OLD ingredient rows, then add
+                        // the new set. It's simpler and safer than trying to
+                        // match old ingredients to new ones one-by-one.
+                        const otherIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
+
+                        updatedRecipe.ingredients.forEach(ing => {
+                            otherIngredients.push({
+                                recipe_id: recipeId,
+                                ingredient_name: ing.name,
+                                quantity: ing.quantity,
+                                unit: ing.unit
+                            });
+                        });
+
+                        fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], recipes), 'utf8', (err) => {
+                            if (err) {
+                                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                                res.end('Could not save recipes');
+                                return;
+                            }
+
+                            fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], otherIngredients), 'utf8', (err) => {
+                                if (err) {
+                                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                                    res.end('Could not save recipe ingredients');
+                                    return;
+                                }
+
+                                res.writeHead(200, { 'Content-Type': 'application/json' });
+                                res.end(JSON.stringify({ id: recipeId, ...updatedRecipe }));
+                            });
+                        });
+                    });
+                });
+            });
+            return;
+        }
+
+        // ---- DELETE a single recipe by id ----
+        // URL looks like /recipes/1234567890 - we need to pull the id
+        // out of the end of the URL.
+        if (req.url.startsWith('/recipes/') && req.method === 'DELETE') {
+            const recipeId = req.url.replace('/recipes/', '');
+
+            fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
                 if (err) {
                     res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read recipe votes');
+                    res.end('Could not read recipes');
                     return;
                 }
 
-                const votes = parseCSV(votesData);
+                const recipes = parseCSV(recipesData);
 
-                // If this person already voted on this recipe, update
-                // their existing vote rather than adding a duplicate row.
-                const existingVote = votes.find(v => v.recipe_id === recipeId && v.person === person);
+                // Keep every recipe EXCEPT the one being deleted
+                const remainingRecipes = recipes.filter(r => r.id !== recipeId);
 
-                if (existingVote) {
-                    existingVote.vote = vote;
-                } else {
-                    votes.push({ recipe_id: recipeId, person, vote });
-                }
-
-                fs.writeFile(RECIPE_VOTES_FILE, stringifyGenericCSV(['recipe_id', 'person', 'vote'], votes), 'utf8', (err) => {
+                fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
                     if (err) {
                         res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not save recipe votes');
+                        res.end('Could not read recipe ingredients');
                         return;
                     }
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ recipe_id: recipeId, person, vote }));
+
+                    const ingredients = parseCSV(ingredientsData);
+
+                    // Also remove any ingredient rows that belonged to
+                    // this recipe, otherwise they'd be orphaned - pointing
+                    // to a recipe_id that no longer exists anywhere.
+                    const remainingIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
+
+                    fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], remainingRecipes), 'utf8', (err) => {
+                        if (err) {
+                            res.writeHead(500, { 'Content-Type': 'text/plain' });
+                            res.end('Could not save recipes');
+                            return;
+                        }
+
+                        fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], remainingIngredients), 'utf8', (err) => {
+                            if (err) {
+                                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                                res.end('Could not save recipe ingredients');
+                                return;
+                            }
+
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ deleted: recipeId }));
+                        });
+                    });
                 });
             });
-        });
-        return;
-    }
+            return;
+        }
+
+
+        // ---- List the household members who can vote ----
+        if (req.url === '/household-members' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(HOUSEHOLD_MEMBERS));
+            return;
+        }
+
+        // ---- Cast (or change) a vote on a recipe ----
+        // URL looks like /recipes/1234567890/votes
+        if (req.url.match(/^\/recipes\/[^/]+\/votes$/) && req.method === 'POST') {
+            const recipeId = req.url.split('/')[2];
+
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                const voteBody = parseJsonBody(body, res);
+                if (!voteBody) return;
+                const { person, vote } = voteBody;
+
+                fs.readFile(RECIPE_VOTES_FILE, 'utf8', (err, votesData) => {
+                    if (err) {
+                        res.writeHead(500, { 'Content-Type': 'text/plain' });
+                        res.end('Could not read recipe votes');
+                        return;
+                    }
+
+                    const votes = parseCSV(votesData);
+
+                    // If this person already voted on this recipe, update
+                    // their existing vote rather than adding a duplicate row.
+                    const existingVote = votes.find(v => v.recipe_id === recipeId && v.person === person);
+
+                    if (existingVote) {
+                        existingVote.vote = vote;
+                    } else {
+                        votes.push({ recipe_id: recipeId, person, vote });
+                    }
+
+                    fs.writeFile(RECIPE_VOTES_FILE, stringifyGenericCSV(['recipe_id', 'person', 'vote'], votes), 'utf8', (err) => {
+                        if (err) {
+                            res.writeHead(500, { 'Content-Type': 'text/plain' });
+                            res.end('Could not save recipe votes');
+                            return;
+                        }
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ recipe_id: recipeId, person, vote }));
+                    });
+                });
+            });
+            return;
+        }
     
-    // ---- Combined inventory across all four sections ----
-    // Used by the Recipes page to check "do we have enough of
-    // this ingredient anywhere in the house?"
-    if (req.url === '/inventory-all' && req.method === 'GET') {
-        readAllInventory((err, items) => {
-            if (err) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Could not read inventory');
-                return;
-            }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(items));
-        });
-        return;
-    }
+        // ---- Combined inventory across all four sections ----
+        // Used by the Recipes page to check "do we have enough of
+        // this ingredient anywhere in the house?"
+        if (req.url === '/inventory-all' && req.method === 'GET') {
+            readAllInventory((err, items) => {
+                if (err) {
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Could not read inventory');
+                    return;
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(items));
+            });
+            return;
+        }
 
-    // ---- All known item names (for dropdown/autocomplete suggestions) ----
-    if (req.url === '/item-names' && req.method === 'GET') {
-        getAllItemNames((err, names) => {
-            if (err) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Could not read item names');
-                return;
-            }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(names));
-        });
-        return;
-    }
+        // ---- All known item names (for dropdown/autocomplete suggestions) ----
+        if (req.url === '/item-names' && req.method === 'GET') {
+            getAllItemNames((err, names) => {
+                if (err) {
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Could not read item names');
+                    return;
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(names));
+            });
+            return;
+        }
 
-    // ---- All known ingredient aliases ----
-    if (req.url === '/ingredient-aliases' && req.method === 'GET') {
-        readAliases((err, aliases) => {
-            if (err) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Could not read ingredient aliases');
-                return;
-            }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(aliases));
-        });
-        return;
-    }
-
-    // ---- Add a new alias ----
-    if (req.url === '/ingredient-aliases' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-            let alias, canonical_name;
-            try {
-                ({ alias, canonical_name } = JSON.parse(body));
-            } catch (err) {
-                res.writeHead(400, { 'Content-Type': 'text/plain' });
-                res.end('Invalid JSON in request body');
-                return;
-            }
-
+        // ---- All known ingredient aliases ----
+        if (req.url === '/ingredient-aliases' && req.method === 'GET') {
             readAliases((err, aliases) => {
                 if (err) {
                     res.writeHead(500, { 'Content-Type': 'text/plain' });
                     res.end('Could not read ingredient aliases');
                     return;
                 }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(aliases));
+            });
+            return;
+        }
 
-                // If this exact alias already exists, update which
-                // canonical name it points to rather than adding a
-                // duplicate row.
-                const existing = aliases.find(a => a.alias.toLowerCase() === alias.toLowerCase());
-
-                if (existing) {
-                    existing.canonical_name = canonical_name;
-                } else {
-                    aliases.push({ alias, canonical_name });
+        // ---- Add a new alias ----
+        if (req.url === '/ingredient-aliases' && req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+                let alias, canonical_name;
+                try {
+                    ({ alias, canonical_name } = JSON.parse(body));
+                } catch (err) {
+                    res.writeHead(400, { 'Content-Type': 'text/plain' });
+                    res.end('Invalid JSON in request body');
+                    return;
                 }
 
-                saveAliases(aliases, (err) => {
+                readAliases((err, aliases) => {
                     if (err) {
                         res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not save ingredient aliases');
+                        res.end('Could not read ingredient aliases');
                         return;
                     }
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ alias, canonical_name }));
+
+                    // If this exact alias already exists, update which
+                    // canonical name it points to rather than adding a
+                    // duplicate row.
+                    const existing = aliases.find(a => a.alias.toLowerCase() === alias.toLowerCase());
+
+                    if (existing) {
+                        existing.canonical_name = canonical_name;
+                    } else {
+                        aliases.push({ alias, canonical_name });
+                    }
+
+                    saveAliases(aliases, (err) => {
+                        if (err) {
+                            res.writeHead(500, { 'Content-Type': 'text/plain' });
+                            res.end('Could not save ingredient aliases');
+                            return;
+                        }
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ alias, canonical_name }));
+                    });
                 });
             });
-        });
-        return;
-    }
+            return;
+        }
 
-    // req.url looks like "/pantry" - strip the leading slash to get
-    // just the section name.
-    const section = req.url.replace('/', '');
+        // req.url looks like "/pantry" - strip the leading slash to get
+        // just the section name.
+        const section = req.url.replace('/', '');
 
-    if (!csvFiles[section]) {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Unknown section: ' + section);
-        return;
-    }
+        if (!csvFiles[section]) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Unknown section: ' + section);
+            return;
+        }
 
-    // ---- GET: return this section's items ----
-    if (req.method === 'GET') {
-        readItems(section, (err, items) => {
-            if (err) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Could not read ' + csvFiles[section]);
-                return;
-            }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(items));
-        });
-        return;
-    }
-
-    // ---- POST: add/update an item, save, return the updated list ----
-    if (req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-
-        req.on('end', () => {
-            const newItem = JSON.parse(body);
-            // If this item is weight-based (g or kg), convert it to grams
-            // right away. That way everything stored is in one consistent
-            // unit, and "10kg" + "500g" merge correctly instead of being
-            // treated as two different items.
-            if (isWeightUnit(newItem.unit)) {
-                newItem.quantity = toGrams(newItem.quantity, newItem.unit);
-                newItem.unit = 'g';
-            }
-
-            // If this item is volume-based (ml or l), convert it to
-            // millilitres right away, same reasoning as the weight
-            // conversion above - one consistent unit so merging works.
-            if (isVolumeUnit(newItem.unit)) {
-            newItem.quantity = toMilliliters(newItem.quantity, newItem.unit);
-            newItem.unit = 'ml';
-            }
-
+        // ---- GET: return this section's items ----
+        if (req.method === 'GET') {
             readItems(section, (err, items) => {
                 if (err) {
                     res.writeHead(500, { 'Content-Type': 'text/plain' });
                     res.end('Could not read ' + csvFiles[section]);
                     return;
                 }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(items));
+            });
+            return;
+        }
 
-                // Same merge logic your old addItem() used: find a
-                // matching item by name AND unit, adjust its quantity.
-                const existingItem = items.find(i =>
-                    i.name.toLowerCase() === newItem.name.toLowerCase() &&
-                    i.unit === newItem.unit
-                );
+        // ---- POST: add/update an item, save, return the updated list ----
+        if (req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
 
-                if (existingItem) {
-                    existingItem.quantity = Number(existingItem.quantity) + Number(newItem.quantity);
-
-                    if (existingItem.quantity <= 0) {
-                        items = items.filter(i =>
-                            !(i.name.toLowerCase() === newItem.name.toLowerCase() && i.unit === newItem.unit)
-                        );
-                    }
-                } else {
-                    items.push(newItem);
+            req.on('end', () => {
+                const newItem = parseJsonBody(body, res);
+                if (!newItem) return;
+                // If this item is weight-based (g or kg), convert it to grams
+                // right away. That way everything stored is in one consistent
+                // unit, and "10kg" + "500g" merge correctly instead of being
+                // treated as two different items.
+                if (isWeightUnit(newItem.unit)) {
+                    newItem.quantity = toGrams(newItem.quantity, newItem.unit);
+                    newItem.unit = 'g';
                 }
 
-                saveItems(section, items, (err) => {
+                // If this item is volume-based (ml or l), convert it to
+                // millilitres right away, same reasoning as the weight
+                // conversion above - one consistent unit so merging works.
+                if (isVolumeUnit(newItem.unit)) {
+                newItem.quantity = toMilliliters(newItem.quantity, newItem.unit);
+                newItem.unit = 'ml';
+                }
+
+                readItems(section, (err, items) => {
                     if (err) {
                         res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not save ' + csvFiles[section]);
+                        res.end('Could not read ' + csvFiles[section]);
                         return;
                     }
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(items));
+
+                    // Same merge logic your old addItem() used: find a
+                    // matching item by name AND unit, adjust its quantity.
+                    const existingItem = items.find(i =>
+                        i.name.toLowerCase() === newItem.name.toLowerCase() &&
+                        i.unit === newItem.unit
+                    );
+
+                    if (existingItem) {
+                        existingItem.quantity = Number(existingItem.quantity) + Number(newItem.quantity);
+
+                        if (existingItem.quantity <= 0) {
+                            items = items.filter(i =>
+                                !(i.name.toLowerCase() === newItem.name.toLowerCase() && i.unit === newItem.unit)
+                            );
+                        }
+                    } else {
+                        items.push(newItem);
+                    }
+
+                    saveItems(section, items, (err) => {
+                        if (err) {
+                            res.writeHead(500, { 'Content-Type': 'text/plain' });
+                            res.end('Could not save ' + csvFiles[section]);
+                            return;
+                        }
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify(items));
+                    });
                 });
             });
-        });
-        return;
-    }
+            return;
+        }
 
-    // ---- DELETE: clear this section back to empty ----
-    if (req.method === 'DELETE') {
-        saveItems(section, [], (err) => {
-            if (err) {
-                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                res.end('Could not clear ' + csvFiles[section]);
-                return;
-            }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify([]));
-        });
-        return;
-    }
+        // ---- DELETE: clear this section back to empty ----
+        if (req.method === 'DELETE') {
+            saveItems(section, [], (err) => {
+                if (err) {
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Could not clear ' + csvFiles[section]);
+                    return;
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify([]));
+            });
+            return;
+        }
 
-    res.writeHead(405, { 'Content-Type': 'text/plain' });
-    res.end('Method not allowed');
-});
+        res.writeHead(405, { 'Content-Type': 'text/plain' });
+        res.end('Method not allowed');
+    });
 
-server.listen(PORT, '127.0.0.1', () => {
-    console.log(`Server is running at http://localhost:${PORT}`);
-});
+    server.listen(PORT, '127.0.0.1', () => {
+        console.log(`Server is running at http://localhost:${PORT}`);
+    });
