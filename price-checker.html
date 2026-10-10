@@ -25,12 +25,39 @@
                 <h2>Check a Price</h2>
                 <p>Check a price below - searches your selected store live and shows every matching product. Click "Save" on any result you want to keep in your price history.</p>
 
+                <!-- Each box sits in its own little column with a small
+                     label above it, all lined up in one row (they stack
+                     on top of each other on a narrow phone screen) -
+                     see .price-field in style.css. -->
                 <div id="price-search-form">
-                    <input type="text" id="price-search-input" placeholder="e.g. Mince" list="item-names-list">
+                    <div class="price-field price-field-grow">
+                        <label for="price-search-input">Search for</label>
+                        <input type="text" id="price-search-input" placeholder="e.g. Mince" list="item-names-list">
+                    </div>
 
-                    <!-- Filled in by price-checker.js from the
-                         server's list of known stores. -->
-                    <select id="store-select"></select>
+                    <div class="price-field">
+                        <label for="store-select">Store</label>
+                        <!-- Filled in by price-checker.js from the
+                             server's list of known stores. -->
+                        <select id="store-select"></select>
+                    </div>
+
+                    <!-- Re-orders the search results below. Changing it
+                         doesn't search again - price-checker.js just
+                         re-sorts what's already there. "Unit price" compares
+                         everything per kg / per litre so it's fair. -->
+                    <div class="price-field">
+                        <label for="price-sort">Sort by</label>
+                        <select id="price-sort">
+                            <option value="">Best match</option>
+                            <option value="name-asc">Name A–Z</option>
+                            <option value="name-desc">Name Z–A</option>
+                            <option value="price-asc">Price: low to high</option>
+                            <option value="price-desc">Price: high to low</option>
+                            <option value="unit-asc">Unit price: low to high</option>
+                            <option value="unit-desc">Unit price: high to low</option>
+                        </select>
+                    </div>
 
                     <button type="button" id="price-search-btn">Search</button>
                 </div>
@@ -38,23 +65,6 @@
                 <!-- Same known-item-names suggestions as the other
                      pages, filled in by price-checker.js. -->
                 <datalist id="item-names-list"></datalist>
-
-                <!-- Re-orders the search results below. Changing it
-                     doesn't search again - price-checker.js just
-                     re-sorts what's already there. "Unit price" compares
-                     everything per kg / per litre so it's fair. -->
-                <div id="price-sort-row">
-                    <label for="price-sort">Sort by:</label>
-                    <select id="price-sort">
-                        <option value="">Best match</option>
-                        <option value="name-asc">Name A–Z</option>
-                        <option value="name-desc">Name Z–A</option>
-                        <option value="price-asc">Price: low to high</option>
-                        <option value="price-desc">Price: high to low</option>
-                        <option value="unit-asc">Unit price: low to high</option>
-                        <option value="unit-desc">Unit price: high to low</option>
-                    </select>
-                </div>
 
                 <!-- Filled in with one row per matching product once
                      a search finishes - starts empty. -->

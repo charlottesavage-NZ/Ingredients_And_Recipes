@@ -186,14 +186,54 @@ input[type="number"] {
     margin-top: 0;
 }
 
-/* The "Sort by" label and dropdown above the search results -
-   wraps onto its own line on a narrow phone screen. */
-#price-sort-row {
+/* The "Search for / Store / Sort by / Search" row on the Price
+   Checker. Everything sits on one line, lined up along the BOTTOM
+   so the boxes and the button are all level, and wraps onto extra
+   lines if the screen is too narrow. (This also replaces the old
+   separate "Sort by" row, which sat out of line underneath.) */
+#price-search-form {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    margin-top: 12px;
+    align-items: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+/* One labelled box: a small label sitting on top of its input or
+   dropdown. */
+.price-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.price-field label {
+    font-size: 0.85em;
+    opacity: 0.9;
+}
+
+/* The "Search for" box takes up whatever room is left over. */
+.price-field-grow {
+    flex: 1 1 200px;
+}
+
+/* Boxes and button all the same height, and no extra gap above the
+   button (buttons elsewhere get a margin-top, which pushed this one
+   out of line). */
+#price-search-form input,
+#price-search-form select,
+#price-search-form button {
+    height: 40px;
+    margin-top: 0;
+}
+
+/* On a phone, every box (and the button) gets its own full-width
+   line instead of squashing up together. */
+@media (max-width: 600px) {
+    .price-field,
+    #price-search-form button {
+        flex: 1 1 100%;
+    }
 }
 
 /* ===================== SAVED PRICE HISTORY ===================== */
@@ -241,6 +281,14 @@ input[type="number"] {
 
 .price-group .price-results-table {
     margin-top: 8px;
+}
+
+/* The supermarket's own product name, shown small and faded under
+   the store name in Saved Prices. */
+.price-original-name {
+    display: block;
+    font-size: 0.8em;
+    opacity: 0.75;
 }
 
 /* On a phone, tighten up the table so all four columns fit

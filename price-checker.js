@@ -461,7 +461,11 @@ function buildHistoryTable(entriesForDay) {
         // One row per store AND pack size - so a single 420g tin and
         // a 3 x 420g multipack from the same store both show up,
         // rather than the newer one hiding the other.
-        const rowKey = `${entry.store}|${entry.package_size}`;
+        // Saves made after the original_name column was added are also
+        // told apart by the supermarket's own name - so "Woolworths
+        // Essentials Diced Tomatoes" and "Woolworths Diced Tomatoes"
+        // (both saved as "Home Brand Diced Tomatoes") both show.
+        const rowKey = `${entry.store}|${entry.package_size}|${entry.original_name || ''}`;
         if (storesShown.has(rowKey)) return;
         storesShown.add(rowKey);
 
@@ -481,6 +485,17 @@ function buildHistoryTable(entriesForDay) {
 
         const storeCell = document.createElement('td');
         storeCell.textContent = entry.store;
+
+        // Underneath the store, in small text: the product's name as
+        // the supermarket actually wrote it (e.g. "Woolworths
+        // Essentials Diced Tomatoes 400g Can"), so you can see which
+        // product each "Home Brand" row really is.
+        if (entry.original_name && entry.original_name !== entry.item_name) {
+            const originalName = document.createElement('small');
+            originalName.classList.add('price-original-name');
+            originalName.textContent = entry.original_name;
+            storeCell.appendChild(originalName);
+        }
 
         const sizeCell = document.createElement('td');
         sizeCell.textContent = entry.package_size || "—";

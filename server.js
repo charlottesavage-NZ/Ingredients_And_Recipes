@@ -52,7 +52,12 @@ const HOUSEHOLD_MEMBERS = ['Charlotte', 'Todd', 'Kayleigh'];
 // first, so price changes over time are kept rather than lost.
 // -------------------------------------------------------------
 const PRICES_FILE = 'prices.csv';
-const PRICE_HEADERS = ['id', 'item_name', 'price', 'cup_price', 'cup_measure', 'package_size', 'store', 'date_checked'];
+// original_name (added last, so the older columns keep their place)
+// is the product's name EXACTLY as the supermarket wrote it, e.g.
+// "Woolworths Essentials Diced Tomatoes 400g Can" - item_name is the
+// tidied-up version used for grouping (see savedPriceName below).
+// Older rows saved before this column existed just have it blank.
+const PRICE_HEADERS = ['id', 'item_name', 'price', 'cup_price', 'cup_measure', 'package_size', 'store', 'date_checked', 'original_name'];
 
 // -------------------------------------------------------------
 // Maps alternate ingredient names to one canonical name, so
@@ -119,7 +124,9 @@ const HOME_BRAND_NAME = 'Home Brand';
 
 // Matches "Pams", "Pams Value", "Pams Finest" or "Woolworths
 // Essentials" at the START of a product name.
-const HOME_BRAND_PATTERN = /^(pams(\s+(value|finest))?|woolworths\s+essentials)\b/i;
+// Also plain "Woolworths" - their own-brand range is sometimes just
+// called "Woolworths Diced Tomatoes" rather than "Essentials".
+const HOME_BRAND_PATTERN = /^(pams(\s+(value|finest))?|woolworths(\s+essentials)?)\b/i;
 
 // -------------------------------------------------------------
 // The name a price gets SAVED under (see the POST /prices route):
@@ -367,7 +374,10 @@ function parseCSV(csvText) {
 // column separators when the file is read back later.
 // -------------------------------------------------------------
 function csvField(value) {
-    const str = String(value);
+    // A missing value (null/undefined) is saved as a blank field -
+    // otherwise it'd be written into the file as the actual WORD
+    // "null" or "undefined".
+    const str = (value === null || value === undefined) ? '' : String(value);
     if (str.includes(',') || str.includes('"') || str.includes('\n')) {
         return '"' + str.replace(/"/g, '""') + '"';
     }
@@ -1496,7 +1506,11 @@ const server = http.createServer((req, res) => {
                     cup_measure: newPrice.cup_measure,
                     package_size: newPrice.package_size,
                     store: newPrice.store,
-                    date_checked: new Date().toISOString()
+                    date_checked: new Date().toISOString(),
+                    // The name exactly as the supermarket wrote it, so
+                    // e.g. "Woolworths Essentials..." and "Woolworths..."
+                    // can still be told apart once both are "Home Brand".
+                    original_name: newPrice.item_name
                 };
 
                 prices.push(entry);
