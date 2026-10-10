@@ -13,6 +13,10 @@ const { chromium } = require('playwright');
 // typed directly into this file - see credentials.js.
 const { TRENTS_USERNAME, TRENTS_PASSWORD } = require('./credentials');
 
+// The big built-in ingredient list and US -> NZ name aliases (e.g.
+// "Ground Beef" -> "Mince") - see ingredient-data.js for the details.
+const { BUILT_IN_ALIASES, EXTRA_INGREDIENT_NAMES } = require('./ingredient-data');
+
 const PORT = 3000;
 
 // -------------------------------------------------------------
@@ -582,6 +586,16 @@ function getAllItemNames(callback) {
             // Curated names go first, so they "win" if there's ever
             // a casing clash with something you've typed yourself.
             COMMON_GROCERY_ITEMS.forEach(addName);
+
+            // Then the big built-in list from ingredient-data.js -
+            // every name on both sides of the alias list (e.g. both
+            // "Cilantro" AND "Coriander"), plus the extra names.
+            Object.entries(BUILT_IN_ALIASES).forEach(([alias, canonical]) => {
+                addName(alias);
+                addName(canonical);
+            });
+            EXTRA_INGREDIENT_NAMES.forEach(addName);
+
             inventoryItems.forEach(item => addName(item.name));
             recipes.forEach(recipe => {
                 recipe.ingredients.forEach(ing => addName(ing.ingredient_name));
@@ -627,15 +641,62 @@ function roundTo2(number) {
 function buildAliasLookup(aliases) {
     const lookup = new Map();
     aliases.forEach(a => {
-        const key = a.alias.toLowerCase();
+        const key = normalizeIngredientName(a.alias);
         if (!lookup.has(key)) lookup.set(key, a.canonical_name);
     });
     return lookup;
 }
 
+// Follows the alias list as far as it goes, so aliases can build on
+// each other: "Gravy Beef" -> "Stewing Beef" -> "Beef" (if you've
+// added that second one yourself). Stops after 10 steps, or if it
+// ever loops back to a name it's already seen, so a mistake in the
+// alias list can never freeze the server.
 function canonicalKey(name, aliasLookup) {
-    const canonical = aliasLookup.get(name.toLowerCase());
-    return (canonical !== undefined ? canonical : name).toLowerCase();
+    let key = normalizeIngredientName(name);
+    const seen = new Set();
+
+    while (aliasLookup.has(key) && !seen.has(key) && seen.size < 10) {
+        seen.add(key);
+        key = normalizeIngredientName(aliasLookup.get(key));
+    }
+    return key;
+}
+
+// -------------------------------------------------------------
+// Tidies up an ingredient name so small differences in how it's
+// written don't stop two names matching:
+// - capitals don't matter ("Onion" = "onion")
+// - apostrophes are ignored ("Confectioners' Sugar")
+// - hyphens count as spaces ("All-Purpose" = "All Purpose")
+// - a plural LAST word counts as singular ("Onions" = "Onion",
+//   "Tomatoes" = "Tomato", "Berries" = "Berry")
+// The result is only used behind the scenes for matching - it's
+// never shown on the page or saved anywhere.
+// Same function as in recipes.js - keep the two the same.
+// -------------------------------------------------------------
+function normalizeIngredientName(name) {
+    const words = String(name)
+        .toLowerCase()
+        .replace(/['’]/g, '')
+        .replace(/[-_]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .split(' ');
+
+    let lastWord = words[words.length - 1];
+    if (lastWord.length > 3) {
+        if (lastWord.endsWith('oes')) {
+            lastWord = lastWord.slice(0, -2);              // tomatoes -> tomato
+        } else if (lastWord.endsWith('ies')) {
+            lastWord = lastWord.slice(0, -3) + 'y';        // berries -> berry
+        } else if (lastWord.endsWith('s') && !lastWord.endsWith('ss')) {
+            lastWord = lastWord.slice(0, -1);              // onions -> onion (but not "swiss")
+        }
+    }
+    words[words.length - 1] = lastWord;
+
+    return words.join(' ');
 }
 
 // -------------------------------------------------------------
@@ -685,6 +746,10 @@ function planRecipeDeduction(recipe, itemsBySection, aliasLookup) {
         let quantity = Number(ing.quantity);
         let unit = ing.unit;
 
+        // Nothing to take (e.g. an amount changed to 0 in the pop-up,
+        // or left blank) - just skip it quietly.
+        if (!(quantity > 0)) return;
+
         if (SPOON_UNITS.includes(unit)) {
             skipped.push({ ingredient: ing.ingredient_name, reason: 'spoon' });
             return;
@@ -706,9 +771,30 @@ function planRecipeDeduction(recipe, itemsBySection, aliasLookup) {
             }
         }
 
+        // The amount in the recipe's OWN unit (e.g. 1.8 kg rather than
+        // 1800 g), which is what the pop-up shows in its edit box.
+        // "each" uses the whole-number amount worked out above.
+        const recipeQuantity = ing.unit === 'each' ? quantity : Number(ing.quantity);
+
         const neededKey = canonicalKey(ing.ingredient_name, aliasLookup);
         let stillNeeded = quantity;
         const taken = [];
+
+        // How much of it there is in the WHOLE house before anything
+        // is taken - lets the pop-up warn you straight away if you
+        // type in more than you've actually got.
+        // foundIn lists every place it's stored, in the order stock
+        // would be taken, so the pop-up can say where it comes from.
+        let available = 0;
+        const foundIn = [];
+        DEDUCT_ORDER.forEach(section => {
+            itemsBySection[section].forEach(item => {
+                if (item.unit === unit && canonicalKey(item.name, aliasLookup) === neededKey && Number(item.quantity) > 0) {
+                    available += Number(item.quantity);
+                    foundIn.push({ section, item: item.name });
+                }
+            });
+        });
 
         // Go through each storage area in DEDUCT_ORDER, taking from
         // every matching item (same canonical name AND same unit)
@@ -733,6 +819,10 @@ function planRecipeDeduction(recipe, itemsBySection, aliasLookup) {
         deductions.push({
             ingredient: ing.ingredient_name,
             unit,
+            recipeQuantity,
+            recipeUnit: ing.unit,
+            available: roundTo2(available),
+            foundIn,
             taken,
             short: stillNeeded
         });
@@ -1107,6 +1197,22 @@ function readAliases(callback) {
     });
 }
 
+// -------------------------------------------------------------
+// YOUR aliases (ingredient_aliases.csv) plus the built-in ones from
+// ingredient-data.js, as one list. Yours come FIRST, so if the same
+// name is in both, yours wins (buildAliasLookup keeps the first).
+// Only used for reading - saving a new alias still only ever writes
+// your own ones to the CSV, never the built-in list.
+// -------------------------------------------------------------
+function readAllAliases(callback) {
+    readAliases((err, aliases) => {
+        if (err) return callback(err, null);
+
+        const builtIn = Object.entries(BUILT_IN_ALIASES).map(([alias, canonical_name]) => ({ alias, canonical_name }));
+        callback(null, aliases.concat(builtIn));
+    });
+}
+
 // Saves the FULL alias list back to ingredient_aliases.csv.
 function saveAliases(aliases, callback) {
     writeFileSafely(ALIASES_FILE, stringifyGenericCSV(ALIAS_HEADERS, aliases), callback);
@@ -1399,23 +1505,34 @@ const server = http.createServer((req, res) => {
     // Send { confirm: false } to just PREVIEW what would be taken
     // (nothing is saved), then { confirm: true } to actually do it.
     // Both reply with the same plan - see planRecipeDeduction().
+    // The confirm can also send its own "ingredients" list - the
+    // amounts as edited in the pop-up (e.g. 6 eggs instead of 5) -
+    // which is then used INSTEAD of the recipe's own amounts.
     if (req.url.match(/^\/recipes\/[^/]+\/made$/) && req.method === 'POST') {
         const recipeId = req.url.split('/')[2];
 
-        readJsonBody(req, res, ({ confirm }) => runOneAtATime(res, () => {
+        readJsonBody(req, res, ({ confirm, ingredients }) => runOneAtATime(res, () => {
             readRecipes((err, recipes) => {
                 if (err) return sendText(res, 500, 'Could not read recipes');
 
                 const recipe = recipes.find(r => r.id === recipeId);
                 if (!recipe) return sendText(res, 404, 'Recipe not found');
 
-                readAliases((err, aliases) => {
+                readAllAliases((err, aliases) => {
                     if (err) return sendText(res, 500, 'Could not read ingredient aliases');
 
                     readEachSection((err, itemsBySection) => {
                         if (err) return sendText(res, 500, 'Could not read inventory');
 
-                        const { usedUpItems, ...plan } = planRecipeDeduction(recipe, itemsBySection, buildAliasLookup(aliases));
+                        // Edited amounts from the pop-up, if any were sent -
+                        // otherwise just the recipe's own ingredient list.
+                        const ingredientsToUse = Array.isArray(ingredients) ? ingredients : recipe.ingredients;
+
+                        const { usedUpItems, ...plan } = planRecipeDeduction(
+                            { ...recipe, ingredients: ingredientsToUse },
+                            itemsBySection,
+                            buildAliasLookup(aliases)
+                        );
 
                         // Preview only - reply with the plan, save nothing.
                         if (!confirm) return sendJson(res, { recipe: recipe.name, ...plan, saved: false });
@@ -1464,8 +1581,9 @@ const server = http.createServer((req, res) => {
     }
 
     // ---- All known ingredient aliases ----
+    // (yours AND the built-in ones - see readAllAliases)
     if (req.url === '/ingredient-aliases' && req.method === 'GET') {
-        readAliases((err, aliases) => {
+        readAllAliases((err, aliases) => {
             if (err) return sendText(res, 500, 'Could not read ingredient aliases');
             sendJson(res, aliases);
         });

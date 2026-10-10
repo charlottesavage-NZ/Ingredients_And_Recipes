@@ -101,6 +101,32 @@
         </main>
     </div>
 
+    <!-- ===================== "I MADE THIS" POP-UP ===================== -->
+    <!-- Hidden until you click "I made this" on a recipe. A <dialog> is
+         the browser's built-in pop-up box - it sits on top of the page
+         and greys out everything behind it. recipes.js fills in the
+         title and one row per ingredient (each with an editable amount,
+         pre-filled from the recipe) every time it opens.
+         method="dialog" means submitting the form just closes the box
+         instead of reloading the page - recipes.js does the rest. -->
+    <dialog id="made-dialog" class="made-dialog">
+        <form method="dialog" id="made-form">
+            <h3 id="made-title"></h3>
+            <p class="made-hint">Change any amount if you used more or less. Set it to 0 to leave that one alone.</p>
+
+            <!-- One row per ingredient that can be taken out of stock -->
+            <div id="made-rows"></div>
+
+            <!-- tsp/tbsp amounts etc. that are deliberately NOT removed -->
+            <p id="made-left-alone" class="made-left-alone"></p>
+
+            <div class="made-buttons">
+                <button type="button" id="made-cancel-btn">Cancel</button>
+                <button type="submit" id="made-confirm-btn">Remove from stock</button>
+            </div>
+        </form>
+    </dialog>
+
     <script src="recipes.js"></script>
 </body>
 </html>

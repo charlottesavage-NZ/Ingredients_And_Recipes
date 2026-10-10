@@ -226,6 +226,79 @@ input[type="number"] {
     display: block;
 }
 
+/* ===================== "I MADE THIS" POP-UP ===================== */
+
+/* The pop-up box itself - a solid version of the same purple as the
+   page, so it's readable on top of everything else. Capped in width
+   for big screens, but never wider than the screen on a phone. */
+.made-dialog {
+    margin: auto;
+    width: min(560px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    padding: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 12px;
+    background: #6b5fc7;
+    color: white;
+    font-family: Georgia, serif;
+}
+
+/* Greys out the page behind the pop-up while it's open. */
+.made-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.45);
+}
+
+.made-dialog h3 {
+    margin-bottom: 6px;
+}
+
+.made-hint,
+.made-left-alone {
+    font-size: 0.9em;
+    opacity: 0.85;
+    margin-bottom: 12px;
+}
+
+/* One row per ingredient: name on the left, then the amount box and
+   its unit, with a small note underneath saying where it'll come
+   from (or a warning if there isn't enough). */
+.made-row {
+    display: grid;
+    grid-template-columns: 1fr 90px 48px;
+    align-items: center;
+    gap: 4px 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.made-row input[type="number"] {
+    width: 100%;
+}
+
+.made-row-note {
+    grid-column: 1 / -1;
+    font-size: 0.85em;
+    opacity: 0.85;
+}
+
+/* Warnings ("only 300 g in the house") stand out a little more. */
+.made-row-note.warning {
+    opacity: 1;
+    color: #ffe08a;
+}
+
+/* Ingredients with none in the house at all - dimmed, since nothing
+   can be taken out for them anyway. */
+.made-row.none-in-house {
+    opacity: 0.6;
+}
+
+.made-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
 .can-make {
     font-weight: bold;
 }

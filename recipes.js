@@ -126,9 +126,54 @@ function escapeHtml(text) {
 // below so a recipe and the pantry can be worded completely
 // differently and still be recognised as the same ingredient.
 // -------------------------------------------------------------
+// It now also follows aliases in a chain ("Gravy Beef" ->
+// "Stewing Beef" -> "Beef") and gives back the tidied-up form from
+// normalizeIngredientName() below - only ever used for matching.
 function resolveIngredientName(name, aliases) {
-    const match = aliases.get(name.toLowerCase());
-    return match !== undefined ? match : name;
+    let key = normalizeIngredientName(name);
+    const seen = new Set();
+
+    // Stops after 10 steps, or if it loops back on itself, so a
+    // mistake in the alias list can never freeze the page.
+    while (aliases.has(key) && !seen.has(key) && seen.size < 10) {
+        seen.add(key);
+        key = normalizeIngredientName(aliases.get(key));
+    }
+    return key;
+}
+
+// -------------------------------------------------------------
+// Tidies up an ingredient name so small differences in how it's
+// written don't stop two names matching:
+// - capitals don't matter ("Onion" = "onion")
+// - apostrophes are ignored ("Confectioners' Sugar")
+// - hyphens count as spaces ("All-Purpose" = "All Purpose")
+// - a plural LAST word counts as singular ("Onions" = "Onion",
+//   "Tomatoes" = "Tomato", "Berries" = "Berry")
+// Same function as in server.js - keep the two the same.
+// -------------------------------------------------------------
+function normalizeIngredientName(name) {
+    const words = String(name)
+        .toLowerCase()
+        .replace(/['’]/g, '')
+        .replace(/[-_]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .split(' ');
+
+    let lastWord = words[words.length - 1];
+    if (lastWord.length > 3) {
+        if (lastWord.endsWith('oes')) {
+            lastWord = lastWord.slice(0, -2);              // tomatoes -> tomato
+        } else if (lastWord.endsWith('ies')) {
+            lastWord = lastWord.slice(0, -3) + 'y';        // berries -> berry
+        } else if (lastWord.endsWith('s') && !lastWord.endsWith('ss')) {
+            lastWord = lastWord.slice(0, -1);              // onions -> onion (but not "swiss")
+        }
+    }
+    words[words.length - 1] = lastWord;
+
+    return words.join(' ');
 }
 
 // -------------------------------------------------------------
@@ -142,7 +187,7 @@ function resolveIngredientName(name, aliases) {
 function buildAliasLookup(aliases) {
     const lookup = new Map();
     aliases.forEach(a => {
-        const key = a.alias.toLowerCase();
+        const key = normalizeIngredientName(a.alias);
         // Keep the FIRST one if an alias is ever listed twice -
         // same result the old one-by-one search used to give.
         if (!lookup.has(key)) lookup.set(key, a.canonical_name);
@@ -188,14 +233,17 @@ function checkRecipeAvailability(recipe, inventory, aliases) {
             return;
         }
 
-        const match = inventory.find(item => {
+        const matches = inventory.filter(item => {
             // canonicalKey is worked out once per pantry item when the
             // data loads (see loadEverything), not once per check.
             return item.canonicalKey === neededCanonicalKey &&
                 item.unit === needed.unit;
         });
 
-        const have = match ? Number(match.quantity) : 0;
+        // Add up EVERY match, not just the first - e.g. "Onion" and
+        // "Red Onions" in the pantry both count towards "2 onions".
+        // This is the same way "I made this" takes from all of them.
+        const have = matches.reduce((total, item) => total + Number(item.quantity), 0);
 
         if (have < needed.quantity) {
             const shortfall = formatQuantity(needed.quantity - have, needed.unit);
@@ -561,7 +609,7 @@ function loadEverything() {
             // for every ingredient of every recipe on every re-render.
             currentInventory = inventory.map(item => ({
                 ...item,
-                canonicalKey: resolveIngredientName(item.name, aliasLookup).toLowerCase()
+                canonicalKey: resolveIngredientName(item.name, aliasLookup)
             }));
             populatePersonDropdown(people);
             populateVoteFilterOptions(people);
@@ -801,75 +849,173 @@ function describeAmount(quantity, unit) {
     return `${nice.quantity} ${nice.unit}`;
 }
 
-// -------------------------------------------------------------
-// Turns the server's plan (see planRecipeDeduction() in server.js)
-// into the plain-text message shown in the Confirm/Cancel box:
-// what will be taken and from where, anything there isn't enough
-// of, and anything that's deliberately left alone.
-// -------------------------------------------------------------
-function describeDeductionPlan(plan) {
-    const removing = [];
-    const short = [];
+// Display names for each unit inside the pop-up's amount boxes.
+const UNIT_LABELS = { g: 'g', kg: 'kg', ml: 'mL', l: 'L', each: 'each' };
 
-    plan.deductions.forEach(d => {
-        d.taken.forEach(t => {
-            // Only mention the stored name if it's worded differently
-            // from the recipe (e.g. recipe says "Beef mince", the
-            // fridge says "Mince"), so it's clear what's being used.
-            const storedAs = t.item.toLowerCase() === d.ingredient.toLowerCase() ? '' : ` ("${t.item}")`;
-            removing.push(`• ${d.ingredient}${storedAs}: ${describeAmount(t.quantity, t.unit)} from the ${SECTION_LABELS[t.section]}`);
-        });
+// The pop-up's pieces (see the <dialog> in recipes.html).
+const madeDialog = document.getElementById('made-dialog');
+const madeForm = document.getElementById('made-form');
+const madeTitle = document.getElementById('made-title');
+const madeRows = document.getElementById('made-rows');
+const madeLeftAlone = document.getElementById('made-left-alone');
+const madeConfirmBtn = document.getElementById('made-confirm-btn');
 
-        if (d.short > 0) {
-            const note = d.taken.length > 0 ? 'using up all you have' : 'none in the house';
-            short.push(`• ${d.ingredient}: ${describeAmount(d.short, d.unit)} short (${note})`);
-        }
-    });
-
-    const leftAlone = plan.skipped.map(s =>
-        s.reason === 'spoon'
-            ? `• ${s.ingredient} (tsp/tbsp - remove it yourself when it runs out)`
-            : `• ${s.ingredient} (less than one whole)`
-    );
-
-    const parts = [`Mark "${plan.recipe}" as made?`];
-    if (removing.length) parts.push('This will remove:\n' + removing.join('\n'));
-    if (short.length) parts.push('Not enough in the house:\n' + short.join('\n'));
-    if (leftAlone.length) parts.push('Not removed:\n' + leftAlone.join('\n'));
-
-    return { message: parts.join('\n\n'), anythingToRemove: removing.length > 0 };
-}
+// Which recipe the pop-up is currently open for, and the preview the
+// server sent back for it - both needed when you click "Remove".
+let madeRecipeId = null;
+let madePreview = null;
 
 // -------------------------------------------------------------
-// "I made this": first asks the server for a PREVIEW of what would
-// be taken out of stock (nothing is changed yet), shows it in a
-// Confirm/Cancel box, and only if you click OK asks the server to
-// actually take it out. A mis-click can't empty the pantry.
+// Sends a "made" request to the server. confirm: false just asks
+// for a preview (nothing changes); confirm: true actually takes the
+// stock out, using the (possibly edited) ingredients list if given.
 // -------------------------------------------------------------
-function markRecipeAsMade(recipeId) {
-    const url = `${SERVER_URL}/recipes/${recipeId}/made`;
-    const send = isConfirmed => fetch(url, {
+function sendMadeRequest(recipeId, isConfirmed, ingredients) {
+    return fetch(`${SERVER_URL}/recipes/${recipeId}/made`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: isConfirmed })
+        body: JSON.stringify({ confirm: isConfirmed, ingredients })
     }).then(response => {
         if (!response.ok) throw new Error('Server said ' + response.status);
         return response.json();
     });
+}
 
-    send(false)
-        .then(preview => {
-            const { message, anythingToRemove } = describeDeductionPlan(preview);
+// -------------------------------------------------------------
+// Works out the small note under one ingredient's amount box, based
+// on the amount CURRENTLY typed in - so it updates live as you type:
+// - where it'll be taken from, e.g. "From: Fridge, then Chest Freezer"
+// - a warning if you've typed more than there is in the house
+// - "none in the house" if there's none at all
+// -------------------------------------------------------------
+function describeMadeRow(deduction, typedAmount) {
+    if (deduction.available <= 0) {
+        return { text: 'None in the house - nothing to remove', warning: true };
+    }
 
-            if (!anythingToRemove) {
-                alert(message + '\n\nThere\'s nothing in the house to take out for this recipe, so nothing was changed.');
-                return;
-            }
+    // Convert what's typed (e.g. 1.5 "kg") into the same base unit
+    // the house stock is counted in (grams), so they can be compared.
+    const typedInBase = toBaseUnit(Number(typedAmount) || 0, deduction.recipeUnit).quantity;
 
-            if (!confirm(message)) return;
+    // Only mention the stored name if it's worded differently from
+    // the recipe (e.g. recipe says "Ground beef", fridge says "Mince").
+    const places = deduction.foundIn.map(f => {
+        const storedAs = f.item.toLowerCase() === deduction.ingredient.toLowerCase() ? '' : ` ("${f.item}")`;
+        return SECTION_LABELS[f.section] + storedAs;
+    });
+    const fromText = 'From: ' + places.join(', then ');
 
-            return send(true).then(() => loadEverything());
+    if (typedInBase > deduction.available) {
+        return {
+            text: `Only ${describeAmount(deduction.available, deduction.unit)} in the house - it'll all be used. ${fromText}`,
+            warning: true
+        };
+    }
+    return { text: fromText, warning: false };
+}
+
+// -------------------------------------------------------------
+// Fills in and opens the pop-up from the server's preview: one row
+// per ingredient, each with its amount pre-filled from the recipe
+// (in the recipe's own unit) so you can just accept it, or change
+// it first if you actually used a different amount.
+// -------------------------------------------------------------
+function openMadeDialog(recipeId, preview) {
+    madeRecipeId = recipeId;
+    madePreview = preview;
+
+    madeTitle.textContent = `Mark "${preview.recipe}" as made?`;
+    madeRows.innerHTML = '';
+
+    preview.deductions.forEach((deduction, index) => {
+        const row = document.createElement('div');
+        row.classList.add('made-row');
+        if (deduction.available <= 0) row.classList.add('none-in-house');
+
+        const unitLabel = UNIT_LABELS[deduction.recipeUnit] || deduction.recipeUnit;
+
+        row.innerHTML = `
+            <label for="made-amount-${index}">${escapeHtml(deduction.ingredient)}</label>
+            <input type="number" id="made-amount-${index}" min="0" step="any" value="${escapeHtml(deduction.recipeQuantity)}" ${deduction.available <= 0 ? 'disabled' : ''}>
+            <span>${escapeHtml(unitLabel)}</span>
+            <span class="made-row-note"></span>
+        `;
+
+        // Show the note now, and keep it up to date while typing.
+        const input = row.querySelector('input');
+        const note = row.querySelector('.made-row-note');
+        const updateNote = () => {
+            const { text, warning } = describeMadeRow(deduction, input.value);
+            note.textContent = text;
+            note.classList.toggle('warning', warning);
+        };
+        input.addEventListener('input', updateNote);
+        updateNote();
+
+        madeRows.appendChild(row);
+    });
+
+    // Anything deliberately NOT being taken out, listed underneath.
+    const leftAlone = preview.skipped.map(s =>
+        s.reason === 'spoon' ? `${s.ingredient} (tsp/tbsp)` : `${s.ingredient} (less than one whole)`
+    );
+    madeLeftAlone.textContent = leftAlone.length
+        ? 'Not removed - take these out yourself when they run out: ' + leftAlone.join(', ')
+        : '';
+
+    // If there's nothing in the house for ANY ingredient, there's
+    // nothing to remove - only offer a Cancel button.
+    const anythingToRemove = preview.deductions.some(d => d.available > 0);
+    madeConfirmBtn.hidden = !anythingToRemove;
+    if (!anythingToRemove) {
+        madeLeftAlone.textContent = "There's nothing in the house to take out for this recipe. " + madeLeftAlone.textContent;
+    }
+
+    madeDialog.showModal();
+}
+
+// "Cancel" just closes the pop-up - nothing has been changed.
+document.getElementById('made-cancel-btn').addEventListener('click', () => madeDialog.close());
+
+// -------------------------------------------------------------
+// "Remove from stock": reads every amount box (as you've left them),
+// and sends those amounts to the server to actually take out.
+// -------------------------------------------------------------
+madeForm.addEventListener('submit', function(event) {
+    event.preventDefault();
+
+    const ingredients = madePreview.deductions.map((deduction, index) => ({
+        ingredient_name: deduction.ingredient,
+        quantity: Number(document.getElementById(`made-amount-${index}`).value) || 0,
+        unit: deduction.recipeUnit
+    }));
+
+    madeConfirmBtn.disabled = true;
+
+    sendMadeRequest(madeRecipeId, true, ingredients)
+        .then(() => {
+            madeDialog.close();
+            loadEverything();
         })
+        .catch(error => {
+            console.error('Could not mark recipe as made:', error);
+            alert('Something went wrong - nothing was taken out of stock. Try again in a moment.');
+        })
+        .finally(() => {
+            madeConfirmBtn.disabled = false;
+        });
+});
+
+// -------------------------------------------------------------
+// "I made this": first asks the server for a PREVIEW of what would
+// be taken out of stock (nothing is changed yet), then shows it in
+// the pop-up with an editable amount for each ingredient. Stock is
+// only taken out once you click "Remove from stock" in there - a
+// mis-click can't empty the pantry.
+// -------------------------------------------------------------
+function markRecipeAsMade(recipeId) {
+    sendMadeRequest(recipeId, false)
+        .then(preview => openMadeDialog(recipeId, preview))
         .catch(error => {
             console.error('Could not mark recipe as made:', error);
             alert('Something went wrong - nothing was taken out of stock. Try again in a moment.');
