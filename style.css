@@ -20,7 +20,7 @@
     --warning: #fbbf5a;         /* "not enough" / "couldn't reach" warnings */
     --danger: #ff8a80;          /* delete / clear-everything buttons */
     --success: #7ee2a8;         /* "You can make this!" */
-    --radius: 12px;             /* rounded corners on boxes */
+    --radius: 0;                /* rounded corners on boxes - 0 means square corners everywhere */
 }
 
 /* This resets default browser spacing and ensures consistent layout behaviour.
@@ -88,29 +88,30 @@ body {
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 0;
     margin-top: 14px;
 }
 
+/* (Square tabs sitting edge to edge, rather than rounded pills.) */
 .main-nav a {
     color: white;
     text-decoration: none;
     font-size: 0.95rem;
     font-weight: 500;
     text-shadow: none;
-    padding: 7px 16px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.15);
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 8px 18px;
+    border-radius: var(--radius);
+    background: transparent;
+    border: none;
 }
 
 .main-nav a:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.12);
 }
 
 /* The page you're currently on - white "pill" so you can see where
    you are. Each page marks its own link with aria-current="page". */
-/* (Now a soft lavender pill rather than bright white.) */
+/* (Now a soft lavender block rather than bright white.) */
 .main-nav a[aria-current="page"] {
     background: rgba(255, 255, 255, 0.85);
     color: #4a3aa8;
@@ -164,8 +165,7 @@ main {
     -webkit-backdrop-filter: blur(12px);   /* Safari support */
     border-radius: var(--radius);               /* rounded corners */
     padding: 22px;                              /* internal spacing */
-    border: 1px solid rgba(255, 255, 255, 0.1); /* subtle border to define the box */
-    box-shadow: 0 8px 24px rgba(10, 4, 30, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.16); /* subtle border to define the box */
 }
 
 @media (max-width: 480px) {
@@ -230,7 +230,7 @@ button[type="button"],
 button[type="submit"] {
     margin-top: 10px;
     padding: 10px 16px;
-    border-radius: 8px;
+    border-radius: var(--radius);
     border: none;
     background: var(--purple); /* a nice purple-blue button colour */
     color: white;
@@ -284,7 +284,7 @@ button.vote-btn:hover,
 /* Optional: style the dropdowns so they look nicer */
 select {
     padding: 9px 10px;
-    border-radius: 8px;
+    border-radius: var(--radius);
     border: 1px solid var(--border);
     background-color: var(--input);
     color: var(--text);
@@ -297,7 +297,7 @@ input[type="text"],
 input[type="number"],
 textarea {
     padding: 9px 10px;
-    border-radius: 8px;
+    border-radius: var(--radius);
     border: 1px solid var(--border);
     background: var(--input);
     color: var(--text);
