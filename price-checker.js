@@ -319,6 +319,83 @@ function loadPriceHistory() {
         });
 }
 
+// -------------------------------------------------------------
+// FUZZY PRODUCT MATCHING for Saved Prices. The supermarkets word the
+// same product differently, e.g.:
+//   Pak'nSave:  "Home Brand Sour Cream & Chives Flavour Potato Chips"
+//   Woolworths: "Home Brand Chips Sour Cream Chives Crinkle Cut"
+// So instead of needing the exact same name, two names count as the
+// same product if most of their WORDS match, in any order.
+//
+// How it decides:
+// - the brand has to match ("Home Brand" only joins "Home Brand",
+//   "Wattie's" only joins "Wattie's")
+// - filler words that don't change what the product IS are ignored
+//   (FILLER_WORDS below - "and", "flavour", "can", "crinkle cut"...)
+// - plurals count as the same word ("Chips" = "Chip")
+// - the score is: words they share / all the words between them.
+//   SAME_PRODUCT_THRESHOLD is the cut-off - tested so the chips above
+//   (0.8) DO join up, but "Baked Beans" vs "Spaghetti" (0.4), plain
+//   vs flavoured chips (0.4) and chicken breast vs thigh (0.33) don't.
+// Only affects how Saved Prices is SHOWN - prices.csv isn't changed.
+// -------------------------------------------------------------
+const SAME_PRODUCT_THRESHOLD = 0.6;
+
+const FILLER_WORDS = new Set([
+    'and', 'with', 'in', 'of', 'the', 'a', 'flavour', 'flavoured', 'flavor',
+    'style', 'crinkle', 'cut', 'can', 'cans', 'bottle', 'tin', 'pack',
+    'punnet', 'bag', 'tray', 'box', 'jar'
+]);
+
+// "Chips" -> "chip", "Tomatoes" -> "tomato", "Berries" -> "berry"
+function singularWord(word) {
+    if (word.length <= 3) return word;
+    if (word.endsWith('oes')) return word.slice(0, -2);
+    if (word.endsWith('ies')) return word.slice(0, -3) + 'y';
+    if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1);
+    return word;
+}
+
+// Breaks a product name down into its brand and its set of
+// meaningful words, ready to be compared by nameSimilarity().
+function describeProductName(name) {
+    const lower = name.toLowerCase();
+    const isHomeBrand = lower.startsWith('home brand');
+    const rest = isHomeBrand ? lower.slice('home brand'.length) : lower;
+
+    const words = rest
+        .replace(/['’]/g, '')          // "Wattie's" -> "watties"
+        .replace(/[^a-z0-9]+/g, ' ')        // "&", "-", "," etc. become spaces
+        .trim()
+        .split(' ')
+        .filter(Boolean);
+
+    // For anything that isn't Home Brand, the first word is the brand
+    // ("Wattie's", "Red", "Mutti"...).
+    const brand = isHomeBrand ? 'home brand' : (words[0] || '');
+    const descriptionWords = (isHomeBrand ? words : words.slice(1))
+        .map(singularWord)
+        .filter(word => !FILLER_WORDS.has(word) && !/^\d/.test(word));   // sizes like "150g" are ignored too
+
+    return { brand, words: new Set(descriptionWords) };
+}
+
+// Tidies a pack size so the same size written two ways still
+// matches: "250mL" = "250ml", "3 x 420g" = "3x420g", "1 L" = "1l".
+function normalizeSize(size) {
+    return String(size || '').toLowerCase().replace(/\s+/g, '');
+}
+
+// How alike two described names are, from 0 (nothing in common, or
+// different brands) to 1 (exactly the same words).
+function nameSimilarity(a, b) {
+    if (a.brand !== b.brand) return 0;
+
+    const shared = [...a.words].filter(word => b.words.has(word)).length;
+    const allWords = new Set([...a.words, ...b.words]).size;
+    return allWords === 0 ? 0 : shared / allWords;
+}
+
 // Turns a saved date into a plain "which day" key (e.g. "2026-10-10")
 // in YOUR time zone, so two saves on the same day group together.
 function dayKey(isoDate) {
@@ -353,14 +430,51 @@ function renderPriceHistory() {
     // "Home Brand Diced Tomatoes In Juice" from Pak'nSave and "Home
     // Brand Diced Tomatoes in Juice" from Woolworths end up in the
     // SAME box. The box is titled with the most recent spelling.
+    //
+    // On top of that, names that are worded DIFFERENTLY but are clearly
+    // the same product are grouped together too - e.g. Pak'nSave's
+    // "Home Brand Sour Cream & Chives Flavour Potato Chips" and
+    // Woolworths' "Home Brand Chips Sour Cream Chives Crinkle Cut".
+    // See describeProductName() and nameSimilarity() below.
     const groups = new Map();
     const groupTitles = new Map();
+    const groupDescriptions = new Map();
+    // The box's name WITHOUT the size added on - see buildHistoryTable().
+    const groupBaseNames = new Map();
+    //
+    // The pack SIZE has to match as well - Red Bull 250ml from two
+    // stores share a box, but Red Bull 475ml gets a box of its own.
     sorted.forEach(entry => {
         if (filterText && !entry.item_name.toLowerCase().includes(filterText)) return;
-        const key = entry.item_name.toLowerCase().replace(/\s+/g, ' ').trim();
+        const sizeKey = normalizeSize(entry.package_size);
+        let key = entry.item_name.toLowerCase().replace(/\s+/g, ' ').trim() + '|' + sizeKey;
+
+        // Not an exact match for an existing box? See if it's a close
+        // enough match for one (same size only), and if so, join that
+        // box instead.
         if (!groups.has(key)) {
-            groups.set(key, []);
-            groupTitles.set(key, entry.item_name);
+            const description = describeProductName(entry.item_name);
+            let bestKey = null;
+            let bestScore = 0;
+            groupDescriptions.forEach((other, otherKey) => {
+                if (other.sizeKey !== sizeKey) return;
+                const score = nameSimilarity(description, other.description);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestKey = otherKey;
+                }
+            });
+
+            if (bestScore >= SAME_PRODUCT_THRESHOLD) {
+                key = bestKey;
+            } else {
+                groups.set(key, []);
+                // The size goes in the title too, so different sizes of
+                // the same product are easy to tell apart at a glance.
+                groupTitles.set(key, entry.package_size ? `${entry.item_name} (${entry.package_size})` : entry.item_name);
+                groupBaseNames.set(key, entry.item_name);
+                groupDescriptions.set(key, { description, sizeKey });
+            }
         }
         groups.get(key).push(entry);
     });
@@ -423,7 +537,7 @@ function renderPriceHistory() {
         // Re-draws just this product's table whenever its date changes.
         const showDay = day => {
             tableHolder.innerHTML = '';
-            tableHolder.appendChild(buildHistoryTable(entries.filter(e => dayKey(e.date_checked) === day)));
+            tableHolder.appendChild(buildHistoryTable(entries.filter(e => dayKey(e.date_checked) === day), groupBaseNames.get(groupKey)));
         };
         dateSelect.addEventListener('change', () => showDay(dateSelect.value));
         showDay(days[0]);
@@ -437,7 +551,10 @@ function renderPriceHistory() {
 // store. If the same store was saved more than once that day, only
 // the latest save is shown (entries are already newest-first).
 // -------------------------------------------------------------
-function buildHistoryTable(entriesForDay) {
+// groupTitle is the name shown at the top of the box (without its
+// size) - used to decide whether each row's own product name needs
+// showing underneath.
+function buildHistoryTable(entriesForDay, groupTitle) {
     // Reuses the same "price-results-table" styling as the
     // live search results, so both tables look consistent.
     const table = document.createElement('table');
@@ -490,10 +607,21 @@ function buildHistoryTable(entriesForDay) {
         // the supermarket actually wrote it (e.g. "Woolworths
         // Essentials Diced Tomatoes 400g Can"), so you can see which
         // product each "Home Brand" row really is.
-        if (entry.original_name && entry.original_name !== entry.item_name) {
+        // Shown whenever it's worded differently from the box's title -
+        // which now also covers rows that were grouped in by the fuzzy
+        // matching (older saves with no original_name use their saved
+        // name instead).
+        //
+        // UPDATE: the supermarket's own name is now shown on EVERY row
+        // that has one, even when it's identical to the box title (e.g.
+        // Pak'nSave's "Red Bull Energy Drink"), so every store's row
+        // looks the same. Older saves with no original_name only show
+        // their saved name if it's different from the title.
+        const ownName = entry.original_name || (entry.item_name !== groupTitle ? entry.item_name : '');
+        if (ownName) {
             const originalName = document.createElement('small');
             originalName.classList.add('price-original-name');
-            originalName.textContent = entry.original_name;
+            originalName.textContent = ownName;
             storeCell.appendChild(originalName);
         }
 
