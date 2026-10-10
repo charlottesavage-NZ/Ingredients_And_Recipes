@@ -107,6 +107,50 @@ const DEFAULT_PAKNSAVE_STORE = "PAK'nSAVE Moorhouse";
 const TRENTS_STORE_NAME = 'Trents Wholesale';
 
 // -------------------------------------------------------------
+// SUPERMARKET HOME BRANDS - when a price is SAVED (not in the live
+// search results), the supermarkets' own budget brands are renamed
+// to one shared name, so the same product lines up across stores in
+// Saved Prices. e.g. both "Pams Diced Tomatoes" (Pak'nSave) and
+// "Woolworths Essentials Diced Tomatoes" (Woolworths) are saved as
+// "Home Brand Diced Tomatoes". Change HOME_BRAND_NAME to rename it.
+// Trents is left alone.
+// -------------------------------------------------------------
+const HOME_BRAND_NAME = 'Home Brand';
+
+// Matches "Pams", "Pams Value", "Pams Finest" or "Woolworths
+// Essentials" at the START of a product name.
+const HOME_BRAND_PATTERN = /^(pams(\s+(value|finest))?|woolworths\s+essentials)\b/i;
+
+// -------------------------------------------------------------
+// The name a price gets SAVED under (see the POST /prices route):
+// - home brands renamed to HOME_BRAND_NAME (see above)
+// - the pack size taken off the end of the name, since it's already
+//   saved in its own Size column - Woolworths writes it in the name
+//   ("...Diced Tomatoes 400g Can") but Pak'nSave doesn't, so without
+//   this the two would never match up.
+// Trents names are saved exactly as they are.
+// -------------------------------------------------------------
+function savedPriceName(name, store) {
+    if (!name || store === TRENTS_STORE_NAME) return name;
+
+    let cleaned = name.replace(HOME_BRAND_PATTERN, HOME_BRAND_NAME);
+
+    // Cut from the LAST pack size in the name onwards, e.g.
+    // "Diced Tomatoes 400g Can" -> "Diced Tomatoes". Same size
+    // pattern as sizeFromWoolworthsName().
+    const sizePattern = /(\d+\s*x\s*)?\d+(\.\d+)?\s*(kg|g|ml|l|pk|pack|ea|sheets|rolls)\b/gi;
+    const matches = [...cleaned.matchAll(sizePattern)];
+    if (matches.length > 0) {
+        const lastSize = matches[matches.length - 1];
+        const trimmed = cleaned.slice(0, lastSize.index).trim();
+        // Only if there's still a real name left afterwards.
+        if (trimmed.length > 0) cleaned = trimmed;
+    }
+
+    return cleaned;
+}
+
+// -------------------------------------------------------------
 // A curated baseline of common grocery items with CORRECT
 // spelling. This exists so the dropdown always has trustworthy
 // suggestions available, even before you've typed anything
@@ -1443,7 +1487,10 @@ const server = http.createServer((req, res) => {
                 // same item.
                 const entry = {
                     id: Date.now().toString(),
-                    item_name: newPrice.item_name,
+                    // Home brands renamed + pack size taken off the
+                    // name, so it lines up across stores - see
+                    // savedPriceName() near the top of this file.
+                    item_name: savedPriceName(newPrice.item_name, newPrice.store),
                     price: newPrice.price,
                     cup_price: newPrice.cup_price,
                     cup_measure: newPrice.cup_measure,

@@ -276,11 +276,21 @@ function renderPriceHistory() {
     // Group every save by product name. Because the list is already
     // newest-first, the most recently checked product ends up first,
     // and each group's own saves are newest-first too.
+    //
+    // Names are grouped ignoring capitals and extra spaces, so e.g.
+    // "Home Brand Diced Tomatoes In Juice" from Pak'nSave and "Home
+    // Brand Diced Tomatoes in Juice" from Woolworths end up in the
+    // SAME box. The box is titled with the most recent spelling.
     const groups = new Map();
+    const groupTitles = new Map();
     sorted.forEach(entry => {
         if (filterText && !entry.item_name.toLowerCase().includes(filterText)) return;
-        if (!groups.has(entry.item_name)) groups.set(entry.item_name, []);
-        groups.get(entry.item_name).push(entry);
+        const key = entry.item_name.toLowerCase().replace(/\s+/g, ' ').trim();
+        if (!groups.has(key)) {
+            groups.set(key, []);
+            groupTitles.set(key, entry.item_name);
+        }
+        groups.get(key).push(entry);
     });
 
     if (groups.size === 0) {
@@ -302,7 +312,8 @@ function renderPriceHistory() {
         historyContainer.appendChild(note);
     }
 
-    groupsToShow.forEach(([itemName, entries]) => {
+    groupsToShow.forEach(([groupKey, entries]) => {
+        const itemName = groupTitles.get(groupKey);
         const box = document.createElement('div');
         box.classList.add('price-group');
 
@@ -375,8 +386,12 @@ function buildHistoryTable(entriesForDay) {
     const storesShown = new Set();
 
     entriesForDay.forEach(entry => {
-        if (storesShown.has(entry.store)) return;
-        storesShown.add(entry.store);
+        // One row per store AND pack size - so a single 420g tin and
+        // a 3 x 420g multipack from the same store both show up,
+        // rather than the newer one hiding the other.
+        const rowKey = `${entry.store}|${entry.package_size}`;
+        if (storesShown.has(rowKey)) return;
+        storesShown.add(rowKey);
 
         const row = document.createElement('tr');
 
