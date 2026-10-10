@@ -9,7 +9,7 @@
     color-scheme: dark;         /* tells the browser to draw its own bits (scrollbars, dropdown lists) dark too */
     --purple: #7a69ee;          /* buttons, links, highlights */
     --purple-dark: #6754e0;     /* button hover */
-    --purple-light: #b4a9ff;    /* outlined buttons and focus glow on the dark cards */
+    --purple-light: #b4a9ff;    /* outlined buttons and the outline on the box you're typing in */
     --purple-soft: rgba(180, 169, 255, 0.14); /* faint purple tint for hovers */
     --text: #f1eefc;            /* main text - a soft off-white, not pure white */
     --text-muted: #bdb5e3;      /* secondary/hint text - a muted lavender */
@@ -155,7 +155,7 @@ main {
    backdrop-filter only works if the background is transparent behind it,
    which is why .container must be transparent. */
 /* (Now a deep purple card - slightly see-through, so the frosted
-   glass effect is back - with soft light text and a gentle shadow.
+   glass effect is back - with soft light text and a thin border.
    Much easier on the eyes than a bright white box.) */
 .inventory-section {
     background: var(--card);                    /* semi-transparent white box */ /* (now semi-transparent deep purple) */
@@ -312,12 +312,12 @@ input[type="file"] {
 
 /* A purple glow around whichever box you're typing in, so it's
    obvious where you are. */
+/* (Now a plain solid purple outline instead of a soft glow.) */
 input:focus,
 select:focus,
 textarea:focus {
-    outline: none;
+    outline: 1px solid var(--purple-light);
     border-color: var(--purple-light);
-    box-shadow: 0 0 0 3px rgba(180, 169, 255, 0.22);
 }
 
 /* Faded placeholder text ("e.g. Mince") inside the dark boxes. */
@@ -652,12 +652,11 @@ option {
     max-width: 95%;
     max-height: 90vh;
     padding: 22px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--purple-light);
     border-radius: var(--radius);
     background: var(--card-solid);
     color: var(--text);
     font-family: inherit;
-    box-shadow: 0 20px 50px rgba(5, 2, 20, 0.6);
 }
 
 /* Greys out the page behind the pop-up while it's open. */
