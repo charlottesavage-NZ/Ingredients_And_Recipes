@@ -67,6 +67,73 @@ loadStoreOptions();
 const searchInput = document.getElementById('price-search-input');
 const searchBtn = document.getElementById('price-search-btn');
 const resultsContainer = document.getElementById('price-search-results');
+const sortSelect = document.getElementById('price-sort');
+
+// The results of the most recent search, in the order the store
+// sent them - see sortResults() below.
+let lastSearchResults = [];
+
+// -------------------------------------------------------------
+// Works out a unit price that can be FAIRLY compared between
+// products, because the stores don't all use the same measure -
+// Woolworths might say "$0.57 / 100G" while another product says
+// "$5.70 / 1KG". Everything is turned into a price per 1 kg (or per
+// 1 litre) behind the scenes, purely for sorting - what's shown on
+// the page doesn't change.
+// Gives back null if it can't be compared (no unit price, or one
+// that's per "each"), so those can go to the bottom of the list.
+// -------------------------------------------------------------
+function comparableUnitPrice(result) {
+    const price = Number(result.cupPrice);
+    if (!price || !result.cupMeasure) return null;
+
+    // e.g. "100G", "1kg", "100mL", "kg calc" (Trents), "L calc"
+    const match = String(result.cupMeasure).toLowerCase().match(/^(\d*\.?\d*)\s*(kg|g|ml|l)\b/);
+    if (!match) return null;
+
+    const amount = Number(match[1]) || 1;            // "kg calc" has no number - means 1 kg
+    const toKgOrLitre = { kg: 1, g: 1 / 1000, l: 1, ml: 1 / 1000 }[match[2]];
+
+    return price / (amount * toKgOrLitre);
+}
+
+// -------------------------------------------------------------
+// Puts a list of search results into the order picked in the
+// "Sort by" dropdown. "Best match" keeps the store's own order.
+// Always sorts a COPY, so the original order is never lost.
+// -------------------------------------------------------------
+function sortResults(results) {
+    const sorted = [...results];
+    const byName = (a, b) => (a.name || '').localeCompare(b.name || '');
+
+    // Anything that can't be compared (no price/unit price) always
+    // goes to the BOTTOM, whichever direction you're sorting in.
+    const byNumber = (getValue, direction) => (a, b) => {
+        const valueA = getValue(a);
+        const valueB = getValue(b);
+        if (valueA === null && valueB === null) return 0;
+        if (valueA === null) return 1;
+        if (valueB === null) return -1;
+        return (valueA - valueB) * direction;
+    };
+    const priceOf = r => (typeof r.price === 'number' ? r.price : null);
+
+    switch (sortSelect.value) {
+        case 'name-asc':    return sorted.sort(byName);
+        case 'name-desc':   return sorted.sort((a, b) => byName(b, a));
+        case 'price-asc':   return sorted.sort(byNumber(priceOf, 1));
+        case 'price-desc':  return sorted.sort(byNumber(priceOf, -1));
+        case 'unit-asc':    return sorted.sort(byNumber(comparableUnitPrice, 1));
+        case 'unit-desc':   return sorted.sort(byNumber(comparableUnitPrice, -1));
+        default:            return sorted;           // "Best match"
+    }
+}
+
+// Changing the dropdown re-orders the results already on screen -
+// no need to search again.
+sortSelect.addEventListener('change', () => {
+    if (lastSearchResults.length > 0) renderResults(sortResults(lastSearchResults));
+});
 const historyContainer = document.getElementById('price-history-list');
 
 // -------------------------------------------------------------
@@ -92,7 +159,12 @@ searchBtn.addEventListener('click', function() {
             if (!response.ok) throw new Error('Search failed');
             return response.json();
         })
-        .then(results => renderResults(results))
+        .then(results => {
+            // Kept so the "Sort by" dropdown can re-order them later
+            // without searching all over again.
+            lastSearchResults = results;
+            renderResults(sortResults(results));
+        })
         .catch(error => {
             console.error('Price search failed:', error);
             resultsContainer.innerHTML = `<p>Something went wrong searching ${storeName} - try again in a moment.</p>`;

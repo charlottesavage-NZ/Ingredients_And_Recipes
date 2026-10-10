@@ -186,6 +186,16 @@ input[type="number"] {
     margin-top: 0;
 }
 
+/* The "Sort by" label and dropdown above the search results -
+   wraps onto its own line on a narrow phone screen. */
+#price-sort-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+}
+
 /* ===================== SAVED PRICE HISTORY ===================== */
 
 /* The "Search saved prices" box stretches across the section. */

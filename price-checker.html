@@ -39,6 +39,23 @@
                      pages, filled in by price-checker.js. -->
                 <datalist id="item-names-list"></datalist>
 
+                <!-- Re-orders the search results below. Changing it
+                     doesn't search again - price-checker.js just
+                     re-sorts what's already there. "Unit price" compares
+                     everything per kg / per litre so it's fair. -->
+                <div id="price-sort-row">
+                    <label for="price-sort">Sort by:</label>
+                    <select id="price-sort">
+                        <option value="">Best match</option>
+                        <option value="name-asc">Name A–Z</option>
+                        <option value="name-desc">Name Z–A</option>
+                        <option value="price-asc">Price: low to high</option>
+                        <option value="price-desc">Price: high to low</option>
+                        <option value="unit-asc">Unit price: low to high</option>
+                        <option value="unit-desc">Unit price: high to low</option>
+                    </select>
+                </div>
+
                 <!-- Filled in with one row per matching product once
                      a search finishes - starts empty. -->
                 <div id="price-search-results"></div>
