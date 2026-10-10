@@ -571,6 +571,45 @@ function renderVotes(recipe) {
 }
 
 // -------------------------------------------------------------
+// Splits a block of text into separate sentences. It splits after
+// a . ! or ? that's followed by a space and then a capital letter,
+// so "Preheat to 200c. Cook the onion" splits into two, but
+// "about 1.5 cups" or "approx. 5 mins" stays in one piece.
+// -------------------------------------------------------------
+function splitIntoSentences(text) {
+    return text.split(/(?<=[.!?])\s+(?=[A-Z])/);
+}
+
+// -------------------------------------------------------------
+// Turns a recipe's instructions into a numbered list of steps,
+// instead of one big wall of text:
+// - Each line typed into the Instructions box becomes its own
+//   numbered step (pressing Enter = starting a new step).
+// - Inside a step, every sentence starts on a new line, so long
+//   steps are easy to scan while you're cooking.
+// - If the whole method was typed as ONE line, there's nothing to
+//   split steps on, so each sentence becomes its own step instead.
+// This only changes how it LOOKS - the saved text isn't touched.
+// -------------------------------------------------------------
+function renderInstructions(instructions) {
+    const lines = instructions
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+
+    const steps = lines.length === 1 ? splitIntoSentences(lines[0]) : lines;
+
+    const stepsHTML = steps.map(step => {
+        const sentencesHTML = splitIntoSentences(step)
+            .map(sentence => `<span class="instruction-sentence">${escapeHtml(sentence)}</span>`)
+            .join('');
+        return `<li>${sentencesHTML}</li>`;
+    }).join('');
+
+    return `<ol class="instructions-list">${stepsHTML}</ol>`;
+}
+
+// -------------------------------------------------------------
 // Builds the on-page list of recipes, each showing its name,
 // ingredients, instructions, an availability check, votes, and
 // Edit/Delete buttons.
@@ -602,7 +641,7 @@ function renderRecipes(recipes) {
         card.innerHTML = `
             <h3>${escapeHtml(recipe.name)}</h3>
             <ul>${ingredientsHTML}</ul>
-            <p>${escapeHtml(recipe.instructions)}</p>
+            ${renderInstructions(recipe.instructions)}
             ${availabilityHTML}
             ${renderVotes(recipe)}
             <button type="button" class="edit-recipe-btn" data-id="${recipe.id}">Edit</button>

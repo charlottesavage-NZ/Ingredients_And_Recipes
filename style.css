@@ -198,6 +198,23 @@ input[type="number"] {
     padding-left: 20px;
 }
 
+/* Recipe instructions, shown as numbered steps (see
+   renderInstructions() in recipes.js). Extra line spacing and a
+   gap between steps stop it reading as one solid block of text. */
+.instructions-list {
+    padding-left: 24px;
+    line-height: 1.5;
+}
+
+.instructions-list li {
+    margin-bottom: 10px;
+}
+
+/* Each sentence inside a step starts on its own line. */
+.instruction-sentence {
+    display: block;
+}
+
 .can-make {
     font-weight: bold;
 }
