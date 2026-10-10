@@ -679,6 +679,7 @@ function renderRecipes(recipes) {
             ${renderInstructions(recipe.instructions)}
             ${availabilityHTML}
             ${renderVotes(recipe)}
+            <button type="button" class="made-recipe-btn" data-id="${recipe.id}">🍳 I made this</button>
             <button type="button" class="edit-recipe-btn" data-id="${recipe.id}">Edit</button>
             <button type="button" class="delete-recipe-btn" data-id="${recipe.id}">Delete</button>
         `;
@@ -784,6 +785,98 @@ recipeForm.addEventListener('submit', function(event) {
 });
 
 // -------------------------------------------------------------
+// Friendly names for each storage area, used in the "I made this"
+// confirmation message (e.g. "from the Chest Freezer").
+// -------------------------------------------------------------
+const SECTION_LABELS = {
+    fridge: 'Fridge',
+    pantry: 'Pantry',
+    freezer: 'Freezer (Inside)',
+    chest: 'Chest Freezer'
+};
+
+// Shows an amount nicely, e.g. 1500 + "g" -> "1.5 kg".
+function describeAmount(quantity, unit) {
+    const nice = formatQuantity(Number(quantity), unit);
+    return `${nice.quantity} ${nice.unit}`;
+}
+
+// -------------------------------------------------------------
+// Turns the server's plan (see planRecipeDeduction() in server.js)
+// into the plain-text message shown in the Confirm/Cancel box:
+// what will be taken and from where, anything there isn't enough
+// of, and anything that's deliberately left alone.
+// -------------------------------------------------------------
+function describeDeductionPlan(plan) {
+    const removing = [];
+    const short = [];
+
+    plan.deductions.forEach(d => {
+        d.taken.forEach(t => {
+            // Only mention the stored name if it's worded differently
+            // from the recipe (e.g. recipe says "Beef mince", the
+            // fridge says "Mince"), so it's clear what's being used.
+            const storedAs = t.item.toLowerCase() === d.ingredient.toLowerCase() ? '' : ` ("${t.item}")`;
+            removing.push(`• ${d.ingredient}${storedAs}: ${describeAmount(t.quantity, t.unit)} from the ${SECTION_LABELS[t.section]}`);
+        });
+
+        if (d.short > 0) {
+            const note = d.taken.length > 0 ? 'using up all you have' : 'none in the house';
+            short.push(`• ${d.ingredient}: ${describeAmount(d.short, d.unit)} short (${note})`);
+        }
+    });
+
+    const leftAlone = plan.skipped.map(s =>
+        s.reason === 'spoon'
+            ? `• ${s.ingredient} (tsp/tbsp - remove it yourself when it runs out)`
+            : `• ${s.ingredient} (less than one whole)`
+    );
+
+    const parts = [`Mark "${plan.recipe}" as made?`];
+    if (removing.length) parts.push('This will remove:\n' + removing.join('\n'));
+    if (short.length) parts.push('Not enough in the house:\n' + short.join('\n'));
+    if (leftAlone.length) parts.push('Not removed:\n' + leftAlone.join('\n'));
+
+    return { message: parts.join('\n\n'), anythingToRemove: removing.length > 0 };
+}
+
+// -------------------------------------------------------------
+// "I made this": first asks the server for a PREVIEW of what would
+// be taken out of stock (nothing is changed yet), shows it in a
+// Confirm/Cancel box, and only if you click OK asks the server to
+// actually take it out. A mis-click can't empty the pantry.
+// -------------------------------------------------------------
+function markRecipeAsMade(recipeId) {
+    const url = `${SERVER_URL}/recipes/${recipeId}/made`;
+    const send = isConfirmed => fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: isConfirmed })
+    }).then(response => {
+        if (!response.ok) throw new Error('Server said ' + response.status);
+        return response.json();
+    });
+
+    send(false)
+        .then(preview => {
+            const { message, anythingToRemove } = describeDeductionPlan(preview);
+
+            if (!anythingToRemove) {
+                alert(message + '\n\nThere\'s nothing in the house to take out for this recipe, so nothing was changed.');
+                return;
+            }
+
+            if (!confirm(message)) return;
+
+            return send(true).then(() => loadEverything());
+        })
+        .catch(error => {
+            console.error('Could not mark recipe as made:', error);
+            alert('Something went wrong - nothing was taken out of stock. Try again in a moment.');
+        });
+}
+
+// -------------------------------------------------------------
 // Handles clicking any Vote, Edit, or Delete button on a recipe
 // card. We listen on the whole list (event delegation) rather
 // than on each button individually, because the buttons are
@@ -813,6 +906,11 @@ recipeList.addEventListener('click', function(event) {
             .catch(error => {
                 console.error('Could not save vote:', error);
             });
+        return;
+    }
+
+    if (event.target.classList.contains('made-recipe-btn')) {
+        markRecipeAsMade(event.target.dataset.id);
         return;
     }
 

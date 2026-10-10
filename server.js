@@ -592,6 +592,155 @@ function getAllItemNames(callback) {
     });
 }
 
+// =============================================================
+// "I MADE THIS" - taking a recipe's ingredients out of stock
+// =============================================================
+
+// -------------------------------------------------------------
+// When a recipe is marked as made, ingredients are taken from the
+// storage areas in THIS order - the fridge first (most likely to go
+// off), the chest freezer last. If one place doesn't have enough,
+// the rest comes from the next place in the list.
+// -------------------------------------------------------------
+const DEDUCT_ORDER = ['fridge', 'pantry', 'freezer', 'chest'];
+
+// -------------------------------------------------------------
+// Teaspoon/tablespoon amounts are NEVER taken out of stock - the
+// pantry tracks the bottle, not how many spoonfuls are left in it,
+// so you remove the bottle yourself once it runs out. Same rule the
+// Recipes page uses when checking what's missing.
+// -------------------------------------------------------------
+const SPOON_UNITS = ['tsp', 'tbsp'];
+
+// Rounds to 2 decimal places, so taking 0.1kg away a few times
+// doesn't leave something like 1499.9999999 grams behind.
+function roundTo2(number) {
+    return Math.round(number * 100) / 100;
+}
+
+// -------------------------------------------------------------
+// Turns the alias list into a lookup table (lowercase alias ->
+// canonical name), then gives back the lowercase canonical form of
+// any name. Lets "Beef Mince" in a recipe match "Mince" in the
+// fridge - same idea as resolveIngredientName() in recipes.js.
+// -------------------------------------------------------------
+function buildAliasLookup(aliases) {
+    const lookup = new Map();
+    aliases.forEach(a => {
+        const key = a.alias.toLowerCase();
+        if (!lookup.has(key)) lookup.set(key, a.canonical_name);
+    });
+    return lookup;
+}
+
+function canonicalKey(name, aliasLookup) {
+    const canonical = aliasLookup.get(name.toLowerCase());
+    return (canonical !== undefined ? canonical : name).toLowerCase();
+}
+
+// -------------------------------------------------------------
+// Reads all four storage areas as SEPARATE lists, e.g.
+// { fridge: [...], pantry: [...], ... }. Unlike readAllInventory(),
+// nothing is merged together, because we need to know exactly
+// which area each item lives in to take stock out of the right one.
+// -------------------------------------------------------------
+function readEachSection(callback) {
+    const sections = Object.keys(csvFiles);
+
+    Promise.all(sections.map(section => fs.promises.readFile(csvFiles[section], 'utf8')))
+        .then(fileContents => {
+            const itemsBySection = {};
+            sections.forEach((section, index) => {
+                itemsBySection[section] = parseCSV(fileContents[index]);
+            });
+            callback(null, itemsBySection);
+        }, err => callback(err, null));
+}
+
+// -------------------------------------------------------------
+// Works out exactly what "I made this" would take out of stock for
+// one recipe. This changes the quantities inside itemsBySection
+// directly, so the caller can save them straight afterwards - or
+// just throw them away, if it's only a preview.
+//
+// The rules (as agreed):
+// - g/kg/ml/L amounts are taken out (500g of a 2kg bag -> 1.5kg)
+// - tsp/tbsp amounts are never taken out (see SPOON_UNITS)
+// - "each" only takes WHOLE ones: 1.5 onions takes 1, half a
+//   lemon takes nothing
+// - if there isn't enough, whatever IS there gets used up, and the
+//   shortfall is reported back rather than blocking the whole thing
+//
+// Gives back { deductions, skipped }, which the Recipes page turns
+// into the "this will remove..." confirmation message, plus
+// usedUpItems - the exact items that hit zero, so ONLY those get
+// removed when saving (never anything else already in that list).
+// -------------------------------------------------------------
+function planRecipeDeduction(recipe, itemsBySection, aliasLookup) {
+    const deductions = [];
+    const skipped = [];
+    const usedUpItems = new Set();
+
+    recipe.ingredients.forEach(ing => {
+        let quantity = Number(ing.quantity);
+        let unit = ing.unit;
+
+        if (SPOON_UNITS.includes(unit)) {
+            skipped.push({ ingredient: ing.ingredient_name, reason: 'spoon' });
+            return;
+        }
+
+        // Convert into the same base units the storage areas use
+        // (grams / millilitres), so they can be compared fairly.
+        if (isWeightUnit(unit)) {
+            quantity = toGrams(quantity, unit);
+            unit = 'g';
+        } else if (isVolumeUnit(unit)) {
+            quantity = toMilliliters(quantity, unit);
+            unit = 'ml';
+        } else if (unit === 'each') {
+            quantity = Math.floor(quantity);
+            if (quantity === 0) {
+                skipped.push({ ingredient: ing.ingredient_name, reason: 'less-than-one' });
+                return;
+            }
+        }
+
+        const neededKey = canonicalKey(ing.ingredient_name, aliasLookup);
+        let stillNeeded = quantity;
+        const taken = [];
+
+        // Go through each storage area in DEDUCT_ORDER, taking from
+        // every matching item (same canonical name AND same unit)
+        // until the recipe's amount is covered.
+        DEDUCT_ORDER.forEach(section => {
+            itemsBySection[section].forEach(item => {
+                if (stillNeeded <= 0) return;
+                if (item.unit !== unit) return;
+                if (canonicalKey(item.name, aliasLookup) !== neededKey) return;
+
+                const have = Number(item.quantity);
+                if (have <= 0) return;
+
+                const takeAmount = Math.min(have, stillNeeded);
+                item.quantity = roundTo2(have - takeAmount);
+                if (item.quantity <= 0) usedUpItems.add(item);
+                stillNeeded = roundTo2(stillNeeded - takeAmount);
+                taken.push({ section, item: item.name, quantity: takeAmount, unit });
+            });
+        });
+
+        deductions.push({
+            ingredient: ing.ingredient_name,
+            unit,
+            taken,
+            short: stillNeeded
+        });
+    });
+
+    return { deductions, skipped, usedUpItems };
+}
+
 // -------------------------------------------------------------
 // Opens a real browser, searches Woolworths NZ for the given
 // term, and returns every matching product with its price.
@@ -1239,6 +1388,55 @@ const server = http.createServer((req, res) => {
                 writeFileSafely(RECIPE_VOTES_FILE, stringifyGenericCSV(RECIPE_VOTE_HEADERS, votes), (err) => {
                     if (err) return sendText(res, 500, 'Could not save recipe votes');
                     sendJson(res, { recipe_id: recipeId, person, vote });
+                });
+            });
+        }));
+        return;
+    }
+
+    // ---- "I made this" - take a recipe's ingredients out of stock ----
+    // URL looks like /recipes/1234567890/made
+    // Send { confirm: false } to just PREVIEW what would be taken
+    // (nothing is saved), then { confirm: true } to actually do it.
+    // Both reply with the same plan - see planRecipeDeduction().
+    if (req.url.match(/^\/recipes\/[^/]+\/made$/) && req.method === 'POST') {
+        const recipeId = req.url.split('/')[2];
+
+        readJsonBody(req, res, ({ confirm }) => runOneAtATime(res, () => {
+            readRecipes((err, recipes) => {
+                if (err) return sendText(res, 500, 'Could not read recipes');
+
+                const recipe = recipes.find(r => r.id === recipeId);
+                if (!recipe) return sendText(res, 404, 'Recipe not found');
+
+                readAliases((err, aliases) => {
+                    if (err) return sendText(res, 500, 'Could not read ingredient aliases');
+
+                    readEachSection((err, itemsBySection) => {
+                        if (err) return sendText(res, 500, 'Could not read inventory');
+
+                        const { usedUpItems, ...plan } = planRecipeDeduction(recipe, itemsBySection, buildAliasLookup(aliases));
+
+                        // Preview only - reply with the plan, save nothing.
+                        if (!confirm) return sendJson(res, { recipe: recipe.name, ...plan, saved: false });
+
+                        // Only re-save the storage areas something was
+                        // actually taken from. Anything that's hit zero
+                        // is removed, same as adding a negative amount
+                        // on the Inventory page does.
+                        const changedSections = new Set();
+                        plan.deductions.forEach(d => d.taken.forEach(t => changedSections.add(t.section)));
+
+                        const saves = [...changedSections].map(section => new Promise((resolve, reject) => {
+                            const remaining = itemsBySection[section].filter(item => !usedUpItems.has(item));
+                            saveItems(section, remaining, err => err ? reject(err) : resolve());
+                        }));
+
+                        Promise.all(saves).then(
+                            () => sendJson(res, { recipe: recipe.name, ...plan, saved: true }),
+                            () => sendText(res, 500, 'Could not save inventory')
+                        );
+                    });
                 });
             });
         }));
