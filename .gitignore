@@ -1,8 +1,5 @@
 credentials.js
 
-# Local-only test launcher (never needed on the garage server)
-dev-server.js
-
 # Live household data - the garage server owns these, so a pull
 # must never overwrite them with the copies from this computer
 *.csv
