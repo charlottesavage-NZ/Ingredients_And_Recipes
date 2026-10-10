@@ -2175,6 +2175,39 @@ function buildShoppingList(plan, recipes, inventory, aliasLookup) {
     }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// -------------------------------------------------------------
+// "Where does this usually go?" - the starting choice in the
+// shopping list's "Add to" dropdown, for when it's bought:
+// 1. wherever it's ALREADY kept in the house (the place with the
+//    most of it, if it's in more than one) - matched the same way
+//    "I made this" matches names, so aliases count too
+// 2. otherwise a guess from its name - anything "frozen" goes in
+//    the freezer, meat/dairy/fresh things in the fridge, and
+//    everything else in the pantry
+// It's only a starting point - the dropdown can be changed.
+// -------------------------------------------------------------
+const FRIDGE_WORDS = /\b(milk|cream|butter|cheese|yoghurt|yogurt|eggs?|mince|chicken|beef|steak|pork|lamb|bacon|ham|sausages?|salami|fish|salmon|prawns?|tofu|lettuce|spinach|rocket|herbs?|coriander|parsley|basil|mint|celery|cucumber|capsicum|courgette|zucchini|mushrooms?|broccoli|cauliflower|berries|strawberries|grapes|hummus|pesto|sour cream|mayonnaise|juice)\b/i;
+
+function guessStorageLocation(name, itemsBySection, aliasLookup) {
+    const key = canonicalKey(name, aliasLookup);
+    let bestSection = null;
+    let bestAmount = 0;
+    Object.keys(csvFiles).forEach(section => {
+        const amount = itemsBySection[section]
+            .filter(item => canonicalKey(item.name, aliasLookup) === key)
+            .reduce((total, item) => total + (Number(item.quantity) || 0), 0);
+        if (amount > bestAmount) {
+            bestAmount = amount;
+            bestSection = section;
+        }
+    });
+    if (bestSection) return bestSection;
+
+    if (/\bfrozen\b/i.test(name)) return 'freezer';
+    if (FRIDGE_WORDS.test(name)) return 'fridge';
+    return 'pantry';
+}
+
 // =============================================================
 // WATCH LIST - prices checked automatically every morning
 // =============================================================
@@ -2867,11 +2900,81 @@ const server = http.createServer((req, res) => {
                     if (err) return sendText(res, 500, 'Could not read ingredient aliases');
                     readAllInventory((err, inventory) => {
                         if (err) return sendText(res, 500, 'Could not read inventory');
-                        sendJson(res, buildShoppingList(plan, recipes, inventory, buildAliasLookup(aliases)));
+                        // Each storage area separately as well, to work out
+                        // where each thing usually goes - see
+                        // guessStorageLocation() above.
+                        readEachSection((err, itemsBySection) => {
+                            if (err) return sendText(res, 500, 'Could not read inventory');
+                            const aliasLookup = buildAliasLookup(aliases);
+                            const list = buildShoppingList(plan, recipes, inventory, aliasLookup)
+                                .map(item => ({ ...item, location: guessStorageLocation(item.name, itemsBySection, aliasLookup) }));
+                            sendJson(res, list);
+                        });
                     });
                 });
             });
         });
+        return;
+    }
+
+    // ---- Meal planner: "Purchased" - add the ticked-off shopping ----
+    // ---- list items to the inventory, all in one go ----
+    // Body: { items: [{ name, quantity, unit, location }, ...] }
+    // Each one is added the same way the Inventory page's Add Item does
+    // (tins/kg/L turned into g/ml first). If that storage area already
+    // has the same thing under a different name - e.g. the recipe says
+    // "Beef mince" but the fridge has "Mince" - it's added to that one
+    // instead of making a second, differently-named item.
+    // It can all be undone in one click, and it goes in the activity log.
+    if (req.url === '/meal-plan/purchased' && req.method === 'POST') {
+        readJsonBody(req, res, ({ items }) => runOneAtATime(res, () => {
+            const bought = (Array.isArray(items) ? items : []).filter(item =>
+                item && item.name && csvFiles[item.location] && Number(item.quantity) > 0);
+            if (bought.length === 0) return sendText(res, 400, 'Nothing ticked to add');
+
+            readAllAliases((err, aliases) => {
+                if (err) return sendText(res, 500, 'Could not read ingredient aliases');
+                const aliasLookup = buildAliasLookup(aliases);
+
+                readEachSection((err, itemsBySection) => {
+                    if (err) return sendText(res, 500, 'Could not read inventory');
+
+                    const changedSections = [...new Set(bought.map(item => item.location))];
+                    const description = bought.length === 1
+                        ? `Added ${bought[0].name} from the shopping list`
+                        : `Added ${bought.length} items from the shopping list`;
+
+                    // A copy of those areas BEFORE adding, for Undo.
+                    rememberForUndo(changedSections, loggedInAs, description, (err, undoId) => {
+                        if (err) return sendText(res, 500, 'Could not read inventory');
+
+                        bought.forEach(item => {
+                            const amount = toStockUnit(Number(item.quantity), item.unit, item.name, aliasLookup);
+                            const key = canonicalKey(item.name, aliasLookup);
+                            const list = itemsBySection[item.location];
+                            const existing = list.find(stock => stock.unit === amount.unit && canonicalKey(stock.name, aliasLookup) === key);
+                            if (existing) {
+                                existing.quantity = roundTo2(Number(existing.quantity) + amount.quantity);
+                            } else {
+                                list.push({ name: item.name, quantity: roundTo2(amount.quantity), unit: amount.unit });
+                            }
+                        });
+
+                        const saves = changedSections.map(section => new Promise((resolve, reject) => {
+                            saveItems(section, itemsBySection[section], err => err ? reject(err) : resolve());
+                        }));
+
+                        Promise.all(saves).then(() => {
+                            logActivity(loggedInAs, bought.map(item => ({
+                                action: 'Bought (shopping list)', item: item.name, quantity: item.quantity,
+                                unit: item.unit, location: SECTION_NAMES[item.location]
+                            })));
+                            sendJson(res, { undoId, description, added: bought.length });
+                        }, () => sendText(res, 500, 'Could not save inventory'));
+                    });
+                });
+            });
+        }));
         return;
     }
 

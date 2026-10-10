@@ -221,9 +221,18 @@ function renderShoppingList() {
             li.appendChild(label);
             li.appendChild(priceLink);
             li.appendChild(forRecipes);
+            li.appendChild(buildAddToControls(item, id));
             list.appendChild(li);
         });
         shoppingListContainer.appendChild(list);
+
+        // "Purchased" - adds everything ticked to the inventory.
+        const purchasedBtn = document.createElement('button');
+        purchasedBtn.type = 'button';
+        purchasedBtn.id = 'purchased-btn';
+        purchasedBtn.textContent = 'Purchased - add ticked items to the inventory';
+        purchasedBtn.addEventListener('click', () => addPurchasedToInventory(purchasedBtn));
+        shoppingListContainer.appendChild(purchasedBtn);
     }
 
     if (gotEnough.length > 0) {
@@ -233,6 +242,128 @@ function renderShoppingList() {
             <ul>${gotEnough.map(item => `<li>${escapeHtml(item.name)}</li>`).join('')}</ul>`;
         shoppingListContainer.appendChild(details);
     }
+}
+
+// =============================================================
+// "PURCHASED" - ticked items straight into the inventory
+// =============================================================
+// Every line on the shopping list has a small "Add to" row: which
+// storage area it goes in, and how much you actually bought. The
+// place starts on the server's guess (wherever it's already kept, or
+// fridge/freezer/pantry from its name - see guessStorageLocation() in
+// server.js), and the amount starts on how much the list says to buy -
+// change either if you need to (e.g. you bought a 1 kg pack, not 750 g).
+// The "Purchased" button then adds every TICKED line to the inventory
+// in one go, with an Undo message straight after.
+// -------------------------------------------------------------
+const STORAGE_AREAS = [
+    ['pantry', 'Pantry'],
+    ['fridge', 'Fridge'],
+    ['freezer', 'Freezer (Inside)'],
+    ['chest', 'Chest Freezer']
+];
+
+// What you changed in each line's "Add to" row, so it isn't lost when
+// the list re-draws (e.g. after ticking something). Keyed by item name.
+const addToChoices = new Map();
+
+// The amount and unit the "Add to" row starts on:
+// - tinned goods in whole tins ("2 tins")
+// - tsp/tbsp things ("none in the house") as 1 - e.g. one bottle
+// - everything else as however much the list says to buy
+function startingAmount(item) {
+    if (item.tinsToBuy !== undefined) return { quantity: item.tinsToBuy, unit: 'tin' };
+    if (item.unit === 'spoon') return { quantity: 1, unit: 'each' };
+    return { quantity: item.unit === 'each' ? item.toBuy : Math.round(item.toBuy), unit: item.unit };
+}
+
+// Unit names shown next to the amount box.
+const UNIT_NAMES = { g: 'g', ml: 'ml', each: 'each', tin: 'tins' };
+
+// Builds one line's "Add to [Fridge] [750] g" row.
+function buildAddToControls(item, id) {
+    if (!addToChoices.has(item.name)) {
+        addToChoices.set(item.name, { location: item.location || 'pantry', ...startingAmount(item) });
+    }
+    const choice = addToChoices.get(item.name);
+
+    const row = document.createElement('div');
+    row.classList.add('add-to-row');
+
+    const locationLabel = document.createElement('label');
+    locationLabel.htmlFor = `${id}-location`;
+    locationLabel.textContent = 'Add to';
+
+    const location = document.createElement('select');
+    location.id = `${id}-location`;
+    STORAGE_AREAS.forEach(([value, text]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = text;
+        location.appendChild(option);
+    });
+    location.value = choice.location;
+    location.addEventListener('change', () => { choice.location = location.value; });
+
+    const amount = document.createElement('input');
+    amount.type = 'number';
+    amount.min = '0';
+    amount.step = 'any';
+    amount.value = choice.quantity;
+    amount.setAttribute('aria-label', `How much ${item.name} you bought`);
+    amount.addEventListener('input', () => { choice.quantity = amount.value; });
+
+    const unit = document.createElement('span');
+    unit.textContent = UNIT_NAMES[choice.unit] || choice.unit;
+
+    row.appendChild(locationLabel);
+    row.appendChild(location);
+    row.appendChild(amount);
+    row.appendChild(unit);
+    return row;
+}
+
+// Sends every ticked line to the server to be added to the inventory.
+function addPurchasedToInventory(button) {
+    const items = shoppingList
+        .filter(item => item.toBuy > 0 && tickedItems.has(item.name))
+        .map(item => {
+            const choice = addToChoices.get(item.name) || { location: item.location, ...startingAmount(item) };
+            return { name: item.name, quantity: Number(choice.quantity), unit: choice.unit, location: choice.location };
+        })
+        .filter(item => item.quantity > 0);
+
+    if (items.length === 0) {
+        alert('Tick the things you bought first.');
+        return;
+    }
+
+    button.disabled = true;
+    fetch(`${SERVER_URL}/meal-plan/purchased`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items })
+    })
+        .then(response => {
+            if (!response.ok) throw new Error('Server said ' + response.status);
+            return response.json();
+        })
+        .then(({ undoId, description }) => {
+            // They're in the house now, so untick them and re-work the
+            // list - they'll move down to "Already in the house".
+            items.forEach(item => {
+                tickedItems.delete(item.name);
+                addToChoices.delete(item.name);
+            });
+            saveTickedItems();
+            loadShoppingList();
+            showUndoToast(description, undoId, loadShoppingList);
+        })
+        .catch(error => {
+            console.error('Could not add the shopping to the inventory:', error);
+            alert("Couldn't add those to the inventory - nothing was changed. Try again in a moment.");
+            button.disabled = false;
+        });
 }
 
 // Asks the server for the shopping list for the current plan.

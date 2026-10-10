@@ -1257,3 +1257,35 @@ ul.graph-legend {
 .site-footer a {
     color: var(--purple-light);
 }
+
+/* The "Add to [Fridge] [750] g" row under each shopping list line. */
+.add-to-row {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding-left: 26px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+ul.shopping-list li .add-to-row label {
+    flex: 0 0 auto;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.add-to-row select,
+.add-to-row input[type="number"] {
+    padding: 4px 6px;
+    font-size: 13px;
+}
+
+.add-to-row input[type="number"] {
+    width: 80px;
+}
+
+#purchased-btn {
+    margin-bottom: 12px;
+}
