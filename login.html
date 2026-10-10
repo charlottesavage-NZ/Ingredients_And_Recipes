@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Log in</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <!-- The login screen. Any page you open on a new phone/computer
+         sends you here first (see auth.js). Your username and password
+         are both just your first name, e.g. todd / todd. Once you've
+         logged in, that browser is remembered for a year. -->
+    <div class="container">
+
+        <header class="header">
+            <h1>What Food do we have?</h1>
+        </header>
+
+        <main>
+            <section id="login-section" class="inventory-section">
+                <h2>Log in</h2>
+
+                <form id="login-form">
+                    <label for="login-username">Username</label>
+                    <input type="text" id="login-username" autocomplete="username" autocapitalize="none" required>
+
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" autocomplete="current-password" required>
+
+                    <!-- "Wrong username or password" shows here if it
+                         doesn't match - starts empty. -->
+                    <p id="login-error"></p>
+
+                    <button type="submit">Log in</button>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <script src="login.js"></script>
+</body>
+</html>

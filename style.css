@@ -292,6 +292,7 @@ select {
 /* Optional: style the input boxes */
 input[type="text"],
 input[type="number"],
+input[type="password"],
 textarea {
     padding: 9px 10px;
     border-radius: var(--radius);
@@ -730,4 +731,31 @@ option {
     flex-wrap: wrap;
     color: var(--text-muted);
     font-size: 15px;
+}
+
+/* ===================== LOGIN ===================== */
+
+/* While auth.js is checking whether this browser is logged in, the
+   page is hidden - so you don't see a flash of an empty page before
+   being sent to the login screen. */
+.checking-login body {
+    visibility: hidden;
+}
+
+/* The login box - narrower than the normal cards and centred. */
+#login-section {
+    max-width: 380px;
+    width: 100%;
+    margin: 0 auto;
+}
+
+/* "Wrong username or password" - empty (and takes no space) until
+   there's something to say. */
+#login-error {
+    color: var(--warning);
+    font-size: 14px;
+}
+
+#login-error:empty {
+    display: none;
 }

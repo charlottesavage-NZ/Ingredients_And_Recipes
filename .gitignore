@@ -9,3 +9,7 @@ dev-server.js
 
 # Half-finished saves from writeFileSafely() in server.js
 *.tmp
+
+# Who is logged in on which browser - see the LOGIN section in server.js.
+# Must stay out of git, or the hourly update would delete it and log everyone out.
+sessions.json

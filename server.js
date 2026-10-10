@@ -9,6 +9,10 @@ const http = require('http');
 const fs = require('fs');
 const { chromium } = require('playwright');
 
+// Used to make the random "you're logged in" codes - see the LOGIN
+// section further down. Built into Node, nothing to install.
+const crypto = require('crypto');
+
 // Trents login details live in their own gitignored file, never
 // typed directly into this file - see credentials.js.
 const { TRENTS_USERNAME, TRENTS_PASSWORD } = require('./credentials');
@@ -1436,6 +1440,81 @@ function readJsonBody(req, res, onData) {
     });
 }
 
+// =============================================================
+// LOGIN - keeps random people out if they ever find the address
+// =============================================================
+
+// -------------------------------------------------------------
+// How it works:
+// 1. A new phone/computer opens any page and gets sent to
+//    login.html (see auth.js).
+// 2. Logging in as one of HOUSEHOLD_MEMBERS, with their first name
+//    as BOTH the username and password (e.g. todd / todd), gets
+//    that browser a random "session" code, saved in a cookie.
+// 3. Every request after that sends the cookie back automatically,
+//    and the server checks the code is one it handed out. No valid
+//    code = the server refuses to read or change anything.
+//
+// It remembers the BROWSER (via the cookie), not the IP address -
+// the garage server sits behind a proxy, so nearly every visitor
+// looks like the same address to it, and home/phone IPs change all
+// the time anyway.
+//
+// Logged-in browsers are saved in sessions.json so a server restart
+// (like the hourly update) doesn't log everyone out. That file is
+// in .gitignore, so git never touches or deletes it.
+// -------------------------------------------------------------
+const SESSIONS_FILE = 'sessions.json';
+const SESSION_COOKIE = 'pantry_session';
+
+// How long a browser stays logged in for - one year, in seconds.
+const SESSION_LENGTH_SECONDS = 60 * 60 * 24 * 365;
+
+// Every logged-in browser: session code -> { person, created }.
+// Read from the file once when the server starts up.
+let sessions = {};
+try {
+    sessions = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+} catch (err) {
+    // No file yet (nobody's logged in so far) - start with none.
+    sessions = {};
+}
+
+function saveSessions() {
+    writeFileSafely(SESSIONS_FILE, JSON.stringify(sessions, null, 2), err => {
+        if (err) console.error('Could not save sessions.json:', err);
+    });
+}
+
+// Pulls the cookies the browser sent into a simple object, e.g.
+// "pantry_session=abc123; other=xyz" -> { pantry_session: 'abc123', other: 'xyz' }
+function readCookies(req) {
+    const cookies = {};
+    (req.headers.cookie || '').split(';').forEach(part => {
+        const [name, ...rest] = part.trim().split('=');
+        if (name) cookies[name] = decodeURIComponent(rest.join('='));
+    });
+    return cookies;
+}
+
+// Who's logged in on this request, e.g. "Todd" - or null if nobody.
+function loggedInPerson(req) {
+    const code = readCookies(req)[SESSION_COOKIE];
+    const session = code && sessions[code];
+    return session ? session.person : null;
+}
+
+// Checks a login attempt. Username and password are both just the
+// person's first name, and capitals don't matter ("Todd" / "todd").
+// Gives back the person's name as written in HOUSEHOLD_MEMBERS, or
+// null if it's not a match.
+function checkLogin(username, password) {
+    const typedName = String(username || '').trim().toLowerCase();
+    const typedPassword = String(password || '').trim().toLowerCase();
+    const person = HOUSEHOLD_MEMBERS.find(name => name.toLowerCase() === typedName);
+    return person && typedPassword === typedName ? person : null;
+}
+
 const server = http.createServer((req, res) => {
 
     // Parsed once here so any route below can read query string
@@ -1454,6 +1533,43 @@ const server = http.createServer((req, res) => {
     if (req.method === 'OPTIONS') {
         res.writeHead(204);
         res.end();
+        return;
+    }
+
+    // ---- LOGIN: check a username/password, remember this browser ----
+    // The only route that works WITHOUT being logged in already.
+    if (parsedUrl.pathname === '/login' && req.method === 'POST') {
+        readJsonBody(req, res, ({ username, password }) => {
+            const person = checkLogin(username, password);
+            if (!person) return sendText(res, 401, 'Wrong username or password');
+
+            // A long random code that's practically impossible to guess.
+            const code = crypto.randomBytes(32).toString('hex');
+            sessions[code] = { person, created: new Date().toISOString() };
+            saveSessions();
+
+            // HttpOnly = the page's own JavaScript can't read the cookie
+            // (only the browser sends it back), SameSite=Lax = other
+            // websites can't make your browser use it behind your back.
+            res.setHeader('Set-Cookie',
+                `${SESSION_COOKIE}=${code}; Path=/; Max-Age=${SESSION_LENGTH_SECONDS}; HttpOnly; SameSite=Lax`);
+            sendJson(res, { person });
+        });
+        return;
+    }
+
+    // ---- EVERYTHING ELSE needs a logged-in browser ----
+    // No valid session cookie = a 401 ("not logged in") reply, and
+    // auth.js on the page sends the browser to login.html.
+    const loggedInAs = loggedInPerson(req);
+    if (!loggedInAs) {
+        sendText(res, 401, 'Not logged in');
+        return;
+    }
+
+    // ---- Who's logged in on this browser (used by auth.js) ----
+    if (parsedUrl.pathname === '/whoami' && req.method === 'GET') {
+        sendJson(res, { person: loggedInAs });
         return;
     }
 
