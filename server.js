@@ -929,7 +929,15 @@ async function searchWoolworths(searchTerm, storeName) {
 
         const page = await context.newPage();
         await page.goto('https://www.woolworths.co.nz/');
-        await page.waitForTimeout(2000);
+
+        // Woolworths' homepage can take several seconds to finish
+        // loading, and typing into the search box before it's ready
+        // means the search silently never happens (it used to wait a
+        // flat 2 seconds, which wasn't always enough). So: wait until
+        // the search box has actually appeared, THEN give the page's
+        // own code another 4 seconds to finish setting itself up.
+        await page.waitForSelector("input[type='search']", { state: 'visible', timeout: 20000 });
+        await page.waitForTimeout(4000);
 
         // Wait specifically for the search response, don't just hope
         // we're fast enough to catch it in the background.
@@ -1006,7 +1014,9 @@ async function searchWoolworths(searchTerm, storeName) {
                     // size is only written inside the product name
                     // (e.g. "...Cherry 180g Punnet") - so this is
                     // null for now and shows as a dash on the page.
-                    packageSize: null,
+                    // UPDATE: it's now read back OUT of the product name
+                    // instead - see sizeFromWoolworthsName() below.
+                    packageSize: sizeFromWoolworthsName(item.productName, variant),
                     // The new reply doesn't include the store's
                     // address like the old one did, so we use the
                     // store name that was chosen in the dropdown.
@@ -1016,6 +1026,37 @@ async function searchWoolworths(searchTerm, storeName) {
         });
 
     return rows;
+}
+
+// -------------------------------------------------------------
+// Woolworths doesn't send the pack size as its own field - it's only
+// written inside the product name, e.g. "...Diced Tomatoes 400g Can"
+// or "Wattie's Baked Beans 3 x 420g Cans". This finds the LAST size
+// written in the name (so a number earlier in the name, like "100%
+// Juice", isn't mistaken for it) and hands back just that part:
+// "400g", "3 x 420g", "1.5L", "6pk".
+//
+// Loose fruit/veg sold by weight has no size in its name at all -
+// for those, the "per kg" way of buying it is shown instead.
+// Anything else with no size found comes back null (a dash).
+// -------------------------------------------------------------
+function sizeFromWoolworthsName(productName, variant) {
+    const sizePattern = /(\d+\s*x\s*)?\d+(\.\d+)?\s*(kg|g|ml|l|pk|pack|ea|sheets|rolls)\b/gi;
+    const matches = (productName || '').match(sizePattern);
+
+    if (matches) {
+        // Tidy it up: "420 g" -> "420g", "3x420g" -> "3 x 420g",
+        // "1.25l" -> "1.25L". Word units like "12 rolls" keep their space.
+        return matches[matches.length - 1]
+            .replace(/(\d)\s+(kg|g|ml|l|pk)\b/gi, '$1$2')
+            .replace(/\s*x\s*/i, ' x ')
+            .replace(/(\d)l\b/g, '$1L');
+    }
+
+    const unit = (variant && variant.unitOfMeasure || '').toUpperCase();
+    if (unit.startsWith('KG')) return 'per kg';
+
+    return null;
 }
 
 // -------------------------------------------------------------
