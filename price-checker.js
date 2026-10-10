@@ -79,6 +79,10 @@ let lastSearchResults = [];
 let lastSearchWasCombined = false;
 let lastFailedStores = [];
 
+// What was typed in for the most recent search - remembered with
+// anything you "Watch", so the morning check can search for it again.
+let lastSearchTerm = '';
+
 // -------------------------------------------------------------
 // Works out a unit price that can be FAIRLY compared between
 // products, because the stores don't all use the same measure -
@@ -158,6 +162,8 @@ searchBtn.addEventListener('click', function() {
     // The real search can take several seconds (a whole browser has
     // to open on the server and load a real page) - show something
     // so it's clear it's working, not stuck.
+    lastSearchTerm = searchTerm;
+
     resultsContainer.innerHTML = storeName.startsWith('Our 3 stores')
         ? `<p>Searching all 3 stores at once - this can take a little longer...</p>`
         : `<p>Searching ${storeName}...</p>`;
@@ -278,8 +284,18 @@ function renderResults(results) {
         const unitPriceCell = document.createElement('td');
         unitPriceCell.textContent = unitPriceText;
 
+        // "Watch" adds it to the Watch List, so the garage checks its
+        // price every morning - see WATCH LIST further down.
+        const watchBtn = document.createElement('button');
+        watchBtn.type = 'button';
+        watchBtn.classList.add('watch-btn');
+        watchBtn.textContent = '☆ Watch';
+        watchBtn.addEventListener('click', () => watchProduct(result, watchBtn));
+
         const saveCell = document.createElement('td');
+        saveCell.classList.add('result-buttons');
         saveCell.appendChild(saveBtn);
+        saveCell.appendChild(watchBtn);
 
         row.appendChild(nameCell);
 
@@ -661,6 +677,26 @@ function renderPriceHistory() {
         dateSelect.addEventListener('change', () => showDay(dateSelect.value));
         showDay(days[0]);
 
+        // A "Show price graph" button, once it's been checked on at
+        // least two different days (one day isn't much of a graph!).
+        if (days.length >= 2) {
+            const graphHolder = document.createElement('div');
+            graphHolder.hidden = true;
+            const graphBtn = document.createElement('button');
+            graphBtn.type = 'button';
+            graphBtn.classList.add('graph-btn');
+            graphBtn.textContent = 'Show price graph';
+            graphBtn.addEventListener('click', () => {
+                graphHolder.hidden = !graphHolder.hidden;
+                graphBtn.textContent = graphHolder.hidden ? 'Show price graph' : 'Hide price graph';
+                if (!graphHolder.hidden && !graphHolder.firstChild) {
+                    graphHolder.appendChild(drawPriceGraph(seriesFromSavedPrices(entries)));
+                }
+            });
+            box.appendChild(graphBtn);
+            box.appendChild(graphHolder);
+        }
+
         historyContainer.appendChild(box);
     });
 }
@@ -770,3 +806,297 @@ const historyFilterInput = document.getElementById('price-history-filter');
 historyFilterInput.addEventListener('input', renderPriceHistory);
 
 loadPriceHistory();
+
+// =============================================================
+// OPENED FROM THE MEAL PLANNER
+// =============================================================
+// The shopping list's "Check price" links open this page as
+// price-checker.html?search=Chopped%20tomatoes - type that into the
+// search box ready to go (you still pick the store and press Search).
+// -------------------------------------------------------------
+const searchFromLink = new URLSearchParams(location.search).get('search');
+if (searchFromLink) {
+    searchInput.value = searchFromLink;
+    searchInput.focus();
+}
+
+// =============================================================
+// PRICE GRAPH
+// =============================================================
+// Draws a simple line graph of price over time - one line per store -
+// as an SVG picture, built by hand here rather than with a charting
+// library. Used by the Saved Prices boxes and the Watch List.
+// -------------------------------------------------------------
+
+// One colour per line on the graph, in order.
+const GRAPH_COLOURS = ['#b4a9ff', '#7ee2a8', '#fbbf5a', '#7fd3ff', '#ff8a80'];
+
+// Turns a product's saved prices into lines for the graph: one line
+// per store (and size, if there's more than one), with ONE point per
+// day - the last price saved that day.
+function seriesFromSavedPrices(entries) {
+    const lines = new Map();
+    [...entries]
+        .sort((a, b) => new Date(a.date_checked) - new Date(b.date_checked))
+        .forEach(entry => {
+            if (entry.price === '' || isNaN(Number(entry.price))) return;
+            const label = entry.package_size ? `${entry.store} (${entry.package_size})` : entry.store;
+            if (!lines.has(label)) lines.set(label, new Map());
+            lines.get(label).set(dayKey(entry.date_checked), { date: entry.date_checked, price: Number(entry.price) });
+        });
+    return [...lines].map(([label, byDay]) => ({ label, points: [...byDay.values()] }));
+}
+
+// "11 Aug" - short date for under the graph.
+function shortDate(isoDate) {
+    return new Date(isoDate).toLocaleDateString('en-NZ', { day: 'numeric', month: 'short' });
+}
+
+// -------------------------------------------------------------
+// Draws the graph. series = [{ label, points: [{ date, price }] }].
+// Dates go along the bottom, prices up the side.
+// -------------------------------------------------------------
+function drawPriceGraph(series) {
+    const holder = document.createElement('div');
+    holder.classList.add('price-graph');
+
+    const allPoints = series.flatMap(s => s.points);
+    if (allPoints.length < 2) {
+        holder.textContent = 'Not enough saved prices for a graph yet.';
+        return holder;
+    }
+
+    // The drawing area, in the SVG's own units (it stretches to fit
+    // the screen - see .price-graph in style.css).
+    const width = 600, height = 220;
+    const left = 56, right = 16, top = 14, bottom = 30;
+
+    const times = allPoints.map(p => new Date(p.date).getTime());
+    const prices = allPoints.map(p => p.price);
+    const firstTime = Math.min(...times), lastTime = Math.max(...times);
+    // A little room above and below the highest/lowest price, so the
+    // lines don't sit right on the edges.
+    let lowPrice = Math.min(...prices), highPrice = Math.max(...prices);
+    const gap = (highPrice - lowPrice) * 0.15 || highPrice * 0.1 || 1;
+    lowPrice = Math.max(0, lowPrice - gap);
+    highPrice = highPrice + gap;
+
+    const x = time => left + (lastTime === firstTime ? 0.5 : (time - firstTime) / (lastTime - firstTime)) * (width - left - right);
+    const y = price => top + (1 - (price - lowPrice) / (highPrice - lowPrice)) * (height - top - bottom);
+
+    const svgParts = [];
+
+    // Price labels and faint lines across, at the top, middle and bottom.
+    [highPrice, (highPrice + lowPrice) / 2, lowPrice].forEach(price => {
+        svgParts.push(`<line x1="${left}" x2="${width - right}" y1="${y(price)}" y2="${y(price)}" class="graph-grid"/>`);
+        svgParts.push(`<text x="${left - 8}" y="${y(price) + 4}" text-anchor="end" class="graph-label">$${price.toFixed(2)}</text>`);
+    });
+
+    // First and last date along the bottom.
+    svgParts.push(`<text x="${left}" y="${height - 8}" class="graph-label">${shortDate(firstTime)}</text>`);
+    svgParts.push(`<text x="${width - right}" y="${height - 8}" text-anchor="end" class="graph-label">${shortDate(lastTime)}</text>`);
+
+    // One line (plus a dot for each check) per store.
+    series.forEach((line, index) => {
+        const colour = GRAPH_COLOURS[index % GRAPH_COLOURS.length];
+        const coords = line.points.map(p => `${x(new Date(p.date).getTime())},${y(p.price)}`);
+        if (coords.length > 1) {
+            svgParts.push(`<polyline points="${coords.join(' ')}" fill="none" stroke="${colour}" stroke-width="2"/>`);
+        }
+        line.points.forEach(p => {
+            // Hovering a dot (or tapping on a phone) shows its date and price.
+            svgParts.push(`<circle cx="${x(new Date(p.date).getTime())}" cy="${y(p.price)}" r="3.5" fill="${colour}">` +
+                `<title>${escapeHtml(line.label)}: $${p.price.toFixed(2)} on ${shortDate(p.date)}</title></circle>`);
+        });
+    });
+
+    holder.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Price over time">${svgParts.join('')}</svg>`;
+
+    // Which colour is which store.
+    const legend = document.createElement('ul');
+    legend.classList.add('graph-legend');
+    series.forEach((line, index) => {
+        const item = document.createElement('li');
+        item.innerHTML = `<span class="graph-key" style="background:${GRAPH_COLOURS[index % GRAPH_COLOURS.length]}"></span>${escapeHtml(line.label)}`;
+        legend.appendChild(item);
+    });
+    holder.appendChild(legend);
+
+    return holder;
+}
+
+// =============================================================
+// WATCH LIST
+// =============================================================
+// "☆ Watch" on a search result adds that exact product (at that
+// store) to the watch list, and saves its price right now too. From
+// then on the garage checks its price every morning by itself - see
+// WATCH LIST in server.js. Each watched product shows its latest
+// price, a "Price drop" badge if it's cheaper than last time, and a
+// graph of its price over time.
+// -------------------------------------------------------------
+const watchListContainer = document.getElementById('watch-list');
+const watchListStatus = document.getElementById('watch-list-status');
+const watchCheckBtn = document.getElementById('watch-check-btn');
+
+function watchProduct(result, button) {
+    button.disabled = true;
+    fetch(`${SERVER_URL}/watch-list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            item_name: result.name,
+            store: result.store,
+            package_size: result.packageSize,
+            search_term: lastSearchTerm,
+            price: result.price,
+            cup_price: result.cupPrice,
+            cup_measure: result.cupMeasure
+        })
+    })
+        .then(response => {
+            if (!response.ok) throw new Error('Server said ' + response.status);
+            button.textContent = '★ Watching';
+            loadWatchList();
+            loadPriceHistory();
+        })
+        .catch(error => {
+            console.error('Could not add to the watch list:', error);
+            button.disabled = false;
+            alert("Couldn't add that to the watch list - try again in a moment.");
+        });
+}
+
+// "Last checked 7:02am today" / "...on 12 Oct", or "not checked yet".
+function describeLastCheck(lastCheck, checking) {
+    if (checking) return 'Checking prices now - this can take a few minutes. Refresh the page to see new prices.';
+    if (!lastCheck || !lastCheck.finishedAt) return 'Prices are checked automatically every morning from 7am.';
+    const finished = new Date(lastCheck.finishedAt);
+    const time = finished.toLocaleTimeString('en-NZ', { hour: 'numeric', minute: '2-digit' });
+    const isToday = dayKey(lastCheck.finishedAt) === dayKey(new Date().toISOString());
+    return `Last checked ${time} ${isToday ? 'today' : 'on ' + shortDate(lastCheck.finishedAt)}. Checked automatically every morning from 7am.`;
+}
+
+function renderWatchList({ items, lastCheck, checking }) {
+    watchListStatus.textContent = describeLastCheck(lastCheck, checking);
+    watchListContainer.innerHTML = '';
+
+    if (items.length === 0) {
+        watchListContainer.innerHTML = '<p class="no-matches">Nothing watched yet - search for a product above and press "☆ Watch".</p>';
+        watchCheckBtn.hidden = true;
+        return;
+    }
+    watchCheckBtn.hidden = false;
+
+    // Price drops first, so they're the first thing you see.
+    const sorted = [...items].sort((a, b) => Number(b.priceDrop) - Number(a.priceDrop));
+
+    sorted.forEach(item => {
+        const box = document.createElement('div');
+        box.classList.add('watch-item');
+        if (item.priceDrop) box.classList.add('watch-item-drop');
+
+        const header = document.createElement('div');
+        header.classList.add('watch-item-header');
+
+        const title = document.createElement('h3');
+        title.textContent = item.item_name;
+        const where = document.createElement('small');
+        where.textContent = item.package_size ? `${item.store} · ${item.package_size}` : item.store;
+        title.appendChild(where);
+        header.appendChild(title);
+
+        // Today's/latest price, with what's changed since last time.
+        const price = document.createElement('div');
+        price.classList.add('watch-price');
+        if (item.latest) {
+            price.textContent = `$${item.latest.price.toFixed(2)}`;
+            if (item.previous && item.latest.price !== item.previous.price) {
+                const change = item.latest.price - item.previous.price;
+                const arrow = document.createElement('span');
+                arrow.classList.add(change < 0 ? 'price-down' : 'price-up');
+                arrow.textContent = `${change < 0 ? '▼' : '▲'} $${Math.abs(change).toFixed(2)}`;
+                price.appendChild(arrow);
+            }
+        } else {
+            price.textContent = 'No price yet';
+        }
+        header.appendChild(price);
+        box.appendChild(header);
+
+        // ---- Badges ----
+        const badges = document.createElement('p');
+        badges.classList.add('watch-badges');
+        if (item.priceDrop) {
+            badges.innerHTML += `<span class="badge badge-drop">Price drop - was $${item.previous.price.toFixed(2)}</span>`;
+        }
+        if (item.lowestSeen) {
+            badges.innerHTML += '<span class="badge badge-lowest">Lowest price we\'ve seen</span>';
+        }
+        if (item.latest) {
+            badges.innerHTML += `<span class="watch-checked">Checked ${shortDate(item.latest.date)}</span>`;
+        }
+        box.appendChild(badges);
+
+        // ---- Graph (folded away) and Remove ----
+        const buttons = document.createElement('div');
+        buttons.classList.add('watch-buttons');
+        const graphHolder = document.createElement('div');
+        graphHolder.hidden = true;
+
+        if (item.history.length >= 2) {
+            const graphBtn = document.createElement('button');
+            graphBtn.type = 'button';
+            graphBtn.classList.add('graph-btn');
+            graphBtn.textContent = 'Show price graph';
+            graphBtn.addEventListener('click', () => {
+                graphHolder.hidden = !graphHolder.hidden;
+                graphBtn.textContent = graphHolder.hidden ? 'Show price graph' : 'Hide price graph';
+                if (!graphHolder.hidden && !graphHolder.firstChild) {
+                    graphHolder.appendChild(drawPriceGraph([{ label: item.store, points: item.history }]));
+                }
+            });
+            buttons.appendChild(graphBtn);
+        }
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.classList.add('remove-item-btn');
+        removeBtn.textContent = 'Stop watching';
+        removeBtn.addEventListener('click', () => {
+            fetch(`${SERVER_URL}/watch-list/${encodeURIComponent(item.id)}`, { method: 'DELETE' })
+                .then(() => loadWatchList())
+                .catch(error => console.error('Could not remove from the watch list:', error));
+        });
+        buttons.appendChild(removeBtn);
+
+        box.appendChild(buttons);
+        box.appendChild(graphHolder);
+        watchListContainer.appendChild(box);
+    });
+}
+
+function loadWatchList() {
+    fetch(`${SERVER_URL}/watch-list`)
+        .then(response => response.json())
+        .then(renderWatchList)
+        .catch(error => {
+            console.error('Could not load the watch list:', error);
+        });
+}
+
+// "Check prices now" - runs the morning check straight away. It
+// carries on in the background on the garage (it can take a few
+// minutes), so this just says it's started.
+watchCheckBtn.addEventListener('click', () => {
+    watchCheckBtn.disabled = true;
+    fetch(`${SERVER_URL}/watch-list/check`, { method: 'POST' })
+        .then(response => response.json())
+        .then(() => {
+            watchListStatus.textContent = describeLastCheck(null, true);
+        })
+        .catch(error => console.error('Could not start the price check:', error))
+        .finally(() => { watchCheckBtn.disabled = false; });
+});
+
+loadWatchList();

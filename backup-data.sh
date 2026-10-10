@@ -13,10 +13,21 @@
 # Backups older than 30 days are deleted automatically, so the
 # folder never fills up the disk.
 #
-# SETTING IT UP (once, on the garage, as root):
-#   crontab -e
-# and add this line at the bottom, which runs it at 3am every night:
-#   0 3 * * * sh /opt/Ingredients_And_Recipes/backup-data.sh
+# SETTING IT UP: it's run every night at 3am by a systemd timer
+# (the same kind of timer as the hourly update), made of two files:
+#   /etc/systemd/system/pantry-backup.service
+#       [Service]
+#       Type=oneshot
+#       ExecStart=/bin/sh /opt/Ingredients_And_Recipes/backup-data.sh
+#   /etc/systemd/system/pantry-backup.timer
+#       [Timer]
+#       OnCalendar=*-*-* 03:00:00
+#       Persistent=true
+#       [Install]
+#       WantedBy=timers.target
+# turned on with:
+#   systemctl daemon-reload && systemctl enable --now pantry-backup.timer
+# Run one straight away with: systemctl start pantry-backup.service
 #
 # RESTORING A BACKUP (e.g. the one from 14 Oct):
 #   systemctl stop ingredients-recipes

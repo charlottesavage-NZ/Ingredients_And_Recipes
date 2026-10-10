@@ -20,6 +20,7 @@
             <nav class="main-nav">
                 <a href="index.html">Inventory</a>
                 <a href="recipes.html" aria-current="page">Recipes</a>
+                <a href="planner.html">Meal Planner</a>
                 <!-- Not built yet - placeholder so the link is ready to
                      go the moment price-checker.html exists. -->
                 <a href="price-checker.html">Price Checker</a>
@@ -33,6 +34,17 @@
                 <select id="person-select">
                     <option value="">-- Select your name --</option>
                 </select>
+
+                <!-- How many people you're cooking for. Every recipe's
+                     amounts (and the missing check, and "I made this")
+                     are scaled to match - see SERVINGS in recipes.js.
+                     This browser remembers your choice. -->
+                <label for="cooking-for">Cooking for</label>
+                <select id="cooking-for">
+                    <option value="1">1 person</option>
+                    <option value="2" selected>2 people</option>
+                    <option value="3">3 people</option>
+                </select>
             </section>
 
  
@@ -45,6 +57,20 @@
                      Title / Ingredients / Instructions layout - recipes.js
                      reads it and fills in the form below for you to check
                      over. Nothing is saved until you click "Save Recipe". -->
+                <!-- Paste a link to a recipe on (almost) any recipe
+                     website, and the form below fills itself in - see
+                     IMPORT FROM A LINK in recipes.js. Like the upload,
+                     nothing is saved until you click "Save Recipe". -->
+                <div id="recipe-link-section">
+                    <label for="recipe-link-input">Import from a recipe website:</label>
+                    <div class="recipe-link-row">
+                        <input type="url" id="recipe-link-input" placeholder="Paste a link e.g. https://www.example.com/beef-tacos">
+                        <button type="button" id="recipe-link-btn">Import</button>
+                    </div>
+                    <!-- "Reading the recipe..." etc. - starts empty. -->
+                    <p id="recipe-link-status"></p>
+                </div>
+
                 <div id="recipe-upload-section">
                     <label for="recipe-file-input">Upload a recipe text file:</label>
                     <input type="file" id="recipe-file-input" accept=".txt">
@@ -53,6 +79,11 @@
                 <form id="recipe-form">
                     <input type="text" id="recipe-name" placeholder="Recipe Name" required>
                     <textarea id="recipe-instructions" placeholder="Instructions" rows="4" required></textarea>
+
+                    <!-- How many people the amounts below are for. Left
+                         blank, it counts as 2. -->
+                    <label for="recipe-servings">Serves (how many people these amounts are for)</label>
+                    <input type="number" id="recipe-servings" placeholder="2" min="1" step="1">
 
                     <!-- This is where ingredient rows get added dynamically
                          by recipes.js. It starts empty and JavaScript fills
@@ -93,6 +124,16 @@
 
                 <label for="name-filter">Recipe name contains:</label>
                 <input type="text" id="name-filter" placeholder="e.g. Spaghetti">
+
+                <!-- "What can I make right now?" - puts the recipes you
+                     have everything for at the top, then the ones only
+                     missing one or two things. -->
+                <label for="recipe-sort">Sort by:</label>
+                <select id="recipe-sort">
+                    <option value="">Order saved</option>
+                    <option value="fewest-missing">What can I make now? (fewest missing first)</option>
+                    <option value="name-asc">Name A-Z</option>
+                </select>
 
                 <button type="button" id="clear-filters-btn">Clear Filters</button>
             </section>

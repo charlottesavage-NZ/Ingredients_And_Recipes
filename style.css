@@ -293,6 +293,7 @@ select {
 input[type="text"],
 input[type="number"],
 input[type="password"],
+input[type="url"],
 textarea {
     padding: 9px 10px;
     border-radius: var(--radius);
@@ -526,6 +527,7 @@ option {
    room, then quantity and unit share the rest evenly. */
 .ingredient-row {
     display: flex;
+    flex-wrap: wrap;   /* lets the "Website said: ..." note sit on its own line underneath */
     gap: 8px;
 }
 
@@ -891,4 +893,336 @@ button.remove-item-btn:hover {
     margin: 0;
     padding: 6px 14px;
     flex-shrink: 0;
+}
+
+/* ===================== RECIPES EXTRAS ===================== */
+
+/* "Amounts for 3 people (recipe serves 2)" under each recipe's name. */
+.servings-note {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin: -4px 0 8px;
+}
+
+/* The "Import from a recipe website" box - link box and button side
+   by side, stacking on a narrow phone. */
+#recipe-link-section {
+    margin-bottom: 16px;
+}
+
+.recipe-link-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.recipe-link-row input {
+    flex: 1 1 260px;
+}
+
+.recipe-link-row button {
+    margin-top: 0;
+}
+
+#recipe-link-status {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-top: 6px;
+}
+
+/* "Website said: 1 large onion, finely chopped" under an imported
+   ingredient row, so it's easy to check. */
+.ingredient-original {
+    flex-basis: 100%;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+/* ===================== MEAL PLANNER ===================== */
+
+/* The seven day boxes - two or three across on a big screen, one
+   per row on a phone. */
+#week-days {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+    margin: 14px 0 6px;
+}
+
+.plan-day {
+    border: 1px solid var(--border);
+    padding: 12px;
+    background: var(--input);
+}
+
+/* Today's box gets a purple edge so it's easy to find. */
+.plan-day.plan-today {
+    border-color: var(--purple-light);
+}
+
+.plan-day h3 {
+    font-size: 16px;
+    margin-bottom: 8px;
+}
+
+.plan-day select {
+    width: 100%;
+}
+
+ul.plan-recipes {
+    list-style: none;
+    padding-left: 0;
+}
+
+ul.plan-recipes li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+ul.plan-recipes li span {
+    flex: 1 1 100%;
+}
+
+ul.plan-recipes li select {
+    width: auto;
+    padding: 4px 6px;
+    font-size: 14px;
+}
+
+ul.plan-recipes li button.remove-item-btn {
+    margin-left: 0;
+}
+
+#clear-week-btn {
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+}
+
+#clear-week-btn:hover {
+    background: rgba(255, 138, 128, 0.12);
+}
+
+/* The shopping list - a tick box on each line, crossed out once ticked. */
+ul.shopping-list {
+    list-style: none;
+    padding-left: 0;
+    margin-top: 10px;
+}
+
+ul.shopping-list li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+ul.shopping-list li label {
+    flex: 1 1 auto;
+    font-size: 15px;
+    font-weight: normal;
+    color: var(--text);
+}
+
+ul.shopping-list li small {
+    flex-basis: 100%;
+    padding-left: 26px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+ul.shopping-list input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--purple);
+}
+
+ul.shopping-list li.ticked label {
+    text-decoration: line-through;
+    color: var(--text-muted);
+}
+
+.check-price-link {
+    color: var(--purple-light);
+    font-size: 13px;
+}
+
+#copy-list-status {
+    margin-left: 10px;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+/* ===================== WATCH LIST & GRAPHS ===================== */
+
+/* Save and Watch sit side by side in the search results. */
+.result-buttons {
+    white-space: nowrap;
+}
+
+.result-buttons button {
+    margin: 0 6px 0 0;
+}
+
+button.watch-btn,
+button.graph-btn,
+#watch-check-btn {
+    background: transparent;
+    color: var(--purple-light);
+    border: 1px solid var(--purple-light);
+}
+
+button.watch-btn:hover,
+button.graph-btn:hover,
+#watch-check-btn:hover {
+    background: var(--purple-soft);
+}
+
+button.graph-btn {
+    padding: 5px 12px;
+    font-size: 13px;
+    font-weight: normal;
+}
+
+#watch-list-status {
+    font-size: 14px;
+}
+
+/* One box per watched product. */
+.watch-item {
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+    margin-top: 12px;
+    background: var(--input);
+}
+
+/* Cheaper than last time - green edge so it stands out. */
+.watch-item.watch-item-drop {
+    border-left: 4px solid var(--success);
+}
+
+.watch-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.watch-item-header h3 {
+    font-size: 16px;
+    margin: 0;
+}
+
+.watch-item-header h3 small {
+    display: block;
+    font-size: 13px;
+    font-weight: normal;
+    color: var(--text-muted);
+}
+
+.watch-price {
+    font-size: 20px;
+    font-weight: bold;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.watch-price span {
+    display: block;
+    font-size: 13px;
+}
+
+.price-down {
+    color: var(--success);
+}
+
+.price-up {
+    color: var(--danger);
+}
+
+.watch-badges {
+    margin: 6px 0 0;
+    font-size: 13px;
+}
+
+.badge {
+    display: inline-block;
+    margin-right: 8px;
+    padding: 1px 8px;
+    font-weight: bold;
+    color: #22123f;
+}
+
+.badge-drop {
+    background: var(--success);
+}
+
+.badge-lowest {
+    background: var(--warning);
+}
+
+.watch-checked {
+    color: var(--text-muted);
+}
+
+.watch-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.watch-buttons button {
+    margin-top: 8px;
+}
+
+.watch-buttons button.remove-item-btn {
+    margin-left: 0;
+}
+
+/* The price graph - stretches to fit the box it's in. */
+.price-graph {
+    margin-top: 10px;
+}
+
+.price-graph svg {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.graph-grid {
+    stroke: rgba(255, 255, 255, 0.1);
+    stroke-width: 1;
+}
+
+.graph-label {
+    fill: var(--text-muted);
+    font-size: 12px;
+    font-family: "Trebuchet MS", Arial, sans-serif;
+}
+
+ul.graph-legend {
+    list-style: none;
+    padding-left: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.graph-key {
+    display: inline-block;
+    width: 12px;
+    height: 3px;
+    margin-right: 6px;
+    vertical-align: middle;
 }

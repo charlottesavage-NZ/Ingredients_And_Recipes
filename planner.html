@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meal Planner</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Checks this browser is logged in, and sends it to the login
+         screen if not - loaded first, before anything else. See auth.js. -->
+    <script src="auth.js"></script>
+</head>
+
+<body>
+    <!-- The Meal Planner: pick recipes for each day of the week, and it
+         builds ONE shopping list for all of them, minus whatever's
+         already in the house. The plan is shared - everyone sees the
+         same week. See planner.js. -->
+    <div class="container">
+
+        <header class="header">
+            <h1>Meal Planner</h1>
+            <nav class="main-nav">
+                <a href="index.html">Inventory</a>
+                <a href="recipes.html">Recipes</a>
+                <a href="planner.html" aria-current="page">Meal Planner</a>
+                <a href="price-checker.html">Price Checker</a>
+            </nav>
+        </header>
+
+        <main>
+            <!-- ===================== THE WEEK ===================== -->
+            <section id="week-section" class="inventory-section">
+                <h2>This Week</h2>
+                <p>Add recipes to any day, and pick how many people each one is for. Changes save straight away.</p>
+
+                <!-- One box per day, Monday to Sunday - filled in by planner.js. -->
+                <div id="week-days"></div>
+
+                <button type="button" id="clear-week-btn">Clear the week</button>
+            </section>
+
+            <!-- ===================== SHOPPING LIST ===================== -->
+            <section id="shopping-section" class="inventory-section">
+                <h2>Shopping List</h2>
+                <p>Everything the week's recipes need, added together, minus what's already in the house. Tick things off as you shop.</p>
+
+                <!-- Filled in by planner.js every time the plan changes. -->
+                <div id="shopping-list"></div>
+
+                <button type="button" id="copy-list-btn">Copy list</button>
+                <!-- "Copied!" etc. - starts empty. -->
+                <span id="copy-list-status"></span>
+            </section>
+        </main>
+    </div>
+
+    <script src="planner.js"></script>
+</body>
+</html>

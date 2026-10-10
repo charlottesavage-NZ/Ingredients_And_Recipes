@@ -13,3 +13,6 @@ dev-server.js
 # Who is logged in on which browser - see the LOGIN section in server.js.
 # Must stay out of git, or the hourly update would delete it and log everyone out.
 sessions.json
+
+# When the morning watch list price check last ran - see WATCH LIST in server.js.
+watch_check_status.json

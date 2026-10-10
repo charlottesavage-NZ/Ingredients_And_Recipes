@@ -500,7 +500,15 @@ function saveItems(section, items, callback) {
 // The column headers for each of the three recipe files, kept in
 // one place so every route that saves them uses the same order.
 // -------------------------------------------------------------
-const RECIPE_HEADERS = ['id', 'name', 'instructions'];
+// servings (added last, so the older columns keep their place) is
+// how many people the recipe's amounts are written for - used to
+// scale it for 1, 2 or 3 people. Blank on older recipes, which then
+// count as DEFAULT_SERVINGS.
+const RECIPE_HEADERS = ['id', 'name', 'instructions', 'servings'];
+
+// How many people a recipe serves if it doesn't say (e.g. every
+// recipe saved before the servings column existed).
+const DEFAULT_SERVINGS = 2;
 const RECIPE_INGREDIENT_HEADERS = ['recipe_id', 'ingredient_name', 'quantity', 'unit'];
 const RECIPE_VOTE_HEADERS = ['recipe_id', 'person', 'vote'];
 
@@ -1748,6 +1756,598 @@ function describeAmount(quantity, unit) {
     return `${quantity} ${unit}`;
 }
 
+// =============================================================
+// IMPORT A RECIPE FROM A LINK
+// =============================================================
+// Almost every recipe website hides a computer-readable copy of the
+// recipe inside its page (it's what Google uses to show recipe cards
+// in search results). It looks something like:
+//   { "@type": "Recipe", "name": "Beef Tacos", "recipeYield": "4",
+//     "recipeIngredient": ["500g beef mince", "1 onion, diced", ...],
+//     "recipeInstructions": [{ "text": "Brown the mince." }, ...] }
+// So instead of needing an AI to rewrite a recipe into our upload
+// file layout, the server reads that hidden copy straight off the
+// page, and turns each ingredient line ("1 large onion, diced") into
+// our name / quantity / unit format. The Recipes page then fills in
+// the Add a Recipe form with it, for you to check before saving.
+// -------------------------------------------------------------
+
+// How many grams ONE cup of common dry ingredients weighs, so a
+// recipe saying "2 cups plain flour" can be compared with the flour
+// in the pantry (which is in grams). Anything not listed here that's
+// measured in cups is turned into millilitres instead (1 cup = 250 ml,
+// the NZ/Australian metric cup). Matched on the WHOLE name, longest
+// first, so "brown sugar" wins over "sugar".
+const GRAMS_PER_CUP = [
+    ['icing sugar', 125], ['brown sugar', 200], ['caster sugar', 220], ['sugar', 200],
+    ['self raising flour', 150], ['self-raising flour', 150], ['flour', 150],
+    ['rolled oats', 90], ['oats', 90], ['rice', 185], ['butter', 230],
+    ['cocoa', 100], ['grated cheese', 100], ['cheese', 100], ['breadcrumbs', 60],
+    ['coconut', 80], ['peas', 140], ['frozen peas', 140], ['corn', 160]
+].sort((a, b) => b[0].length - a[0].length);
+
+// Unicode fraction characters some sites use, turned into plain
+// "1/2" style so they can be read like any other fraction.
+const UNICODE_FRACTIONS = {
+    '½': '1/2', '⅓': '1/3', '⅔': '2/3', '¼': '1/4', '¾': '3/4',
+    '⅕': '1/5', '⅛': '1/8', '⅜': '3/8', '⅝': '5/8', '⅞': '7/8'
+};
+
+// Every way a unit might be written -> what it means. The order
+// matters a little: longer words are tried before shorter ones.
+const UNIT_WORDS = [
+    [/^(kilograms?|kilos?|kgs?)\b/i, 'kg'],
+    [/^(grams?|grammes?|gms?|g)\b/i, 'g'],
+    [/^(millilit(re|er)s?|mls?)\b/i, 'ml'],
+    [/^(lit(re|er)s?|l)\b/i, 'l'],
+    [/^(tablespoons?|tbsps?|tbs|tbl)\b/i, 'tbsp'],
+    [/^(teaspoons?|tsps?)\b/i, 'tsp'],
+    [/^(cups?|c)\b/i, 'cup'],
+    [/^(ounces?|oz)\b/i, 'oz'],
+    [/^(pounds?|lbs?)\b/i, 'lb'],
+    [/^(cans?|tins?)\b/i, 'tin'],
+    [/^(pinch(es)?|dash(es)?)\b/i, 'pinch'],
+    [/^(cloves?)\b/i, 'clove']
+];
+
+// Size/how-to-prepare words at the START of a name that don't change
+// what the ingredient IS ("2 large onions" -> "onions").
+const NAME_DESCRIPTORS = /^((large|medium|small|heaped|level|packed|rounded|generous|good|big|extra|about|approx\.?|of)\s+)+/i;
+
+// Turns "1 1/2", "1/2", "1.5" or "1,5" into a number.
+function readAmount(text) {
+    const parts = text.trim().split(/\s+/);
+    return parts.reduce((total, part) => {
+        if (part.includes('/')) {
+            const [top, bottom] = part.split('/').map(Number);
+            return total + (bottom ? top / bottom : 0);
+        }
+        return total + Number(part.replace(',', '.'));
+    }, 0);
+}
+
+// Takes HTML tags and codes like &amp; out of a bit of text from a
+// web page, leaving just the plain words.
+function plainText(html) {
+    return String(html || '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;|&#039;|&apos;|&rsquo;|&lsquo;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&#(\d+);/g, (match, code) => String.fromCharCode(Number(code)))
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// -------------------------------------------------------------
+// Turns ONE ingredient line from a website into our format, e.g.
+//   "500g beef mince"                 -> Beef mince, 500, g
+//   "1 large onion, finely chopped"   -> Onion, 1, each
+//   "2 x 400g cans chopped tomatoes"  -> Chopped tomatoes, 2, tin
+//   "1 1/2 cups plain flour"          -> Plain flour, 225, g
+//   "2 tbsp olive oil"                -> Olive oil, 2, tbsp
+//   "Salt and pepper, to taste"       -> Salt and pepper, 1, tsp
+// It won't be perfect for every website's wording - which is why it
+// only fills in the form, for you to check before saving.
+// -------------------------------------------------------------
+function parseIngredientLine(line) {
+    let text = plainText(line);
+    Object.entries(UNICODE_FRACTIONS).forEach(([symbol, fraction]) => {
+        text = text.replace(new RegExp(`(\\d)?${symbol}`, 'g'), (match, digit) => (digit ? `${digit} ` : ' ') + fraction);
+    });
+    text = text.trim();
+
+    // ---- The amount at the start, e.g. "1 1/2", "2", "2-3" ----
+    // (for a range like "2-3", the first number is used)
+    let quantity = null;
+    const amountMatch = text.match(/^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)(\s*(?:-|–|to)\s*(\d+\/\d+|\d+(?:[.,]\d+)?))?\s*/);
+    if (amountMatch) {
+        quantity = readAmount(amountMatch[1]);
+        text = text.slice(amountMatch[0].length);
+    }
+
+    // ---- "2 x 400g cans ..." or "1 (400g) tin ..." -> 2 tins ----
+    const tinPattern = /^(x\s*)?\(?\s*\d+(?:\.\d+)?\s*(g|ml|oz)\s*\)?\s*(cans?|tins?)\b\s*/i;
+    if (tinPattern.test(text)) {
+        text = text.replace(tinPattern, '');
+        return finishIngredient(text, quantity || 1, 'tin');
+    }
+    text = text.replace(/^x\s+/i, '');   // "2 x eggs" -> "eggs"
+
+    // ---- The unit, e.g. "g", "cups", "tbsp" ----
+    let unit = null;
+    for (const [pattern, unitName] of UNIT_WORDS) {
+        const match = text.match(pattern);
+        // (The \b in each pattern means the unit has to be a whole
+        // word - so "1 lemon" isn't read as 1 litre of "emon"!)
+        if (match) {
+            unit = unitName;
+            text = text.slice(match[0].length).replace(/^\.?\s*/, '');
+            break;
+        }
+    }
+
+    // "400g can chopped tomatoes" (a size, then the word can/tin) = 1 tin
+    if ((unit === 'g' || unit === 'ml') && /^(cans?|tins?)\b/i.test(text)) {
+        text = text.replace(/^(cans?|tins?)\b\s*/i, '');
+        return finishIngredient(text, 1, 'tin');
+    }
+
+    if (quantity === null) {
+        // No amount at all ("Salt, to taste", "Fresh coriander to
+        // serve") - saved as a teaspoon, which the app treats as
+        // "just check there's SOME in the house".
+        return finishIngredient(text, unit === 'pinch' ? 0.25 : 1, 'tsp');
+    }
+
+    // ---- Convert units we don't use into ones we do ----
+    switch (unit) {
+        case 'oz':    return finishIngredient(text, Math.round(quantity * 28.35), 'g');
+        case 'lb':    return finishIngredient(text, Math.round(quantity * 453.6), 'g');
+        case 'pinch': return finishIngredient(text, 0.25 * quantity, 'tsp');
+        case 'clove': return finishIngredient(`${cleanIngredientName(text)} cloves`, quantity, 'each');
+        case 'cup': {
+            // Dry goods by weight, everything else (milk, stock...) by volume.
+            const name = cleanIngredientName(text).toLowerCase();
+            const dry = GRAMS_PER_CUP.find(([key]) => name.includes(key));
+            return dry
+                ? finishIngredient(text, Math.round(quantity * dry[1]), 'g')
+                : finishIngredient(text, Math.round(quantity * 250), 'ml');
+        }
+        case null:    return finishIngredient(text, quantity, 'each');
+        default:      return finishIngredient(text, quantity, unit);
+    }
+}
+
+// Tidies up the name part of an ingredient line: drops anything after
+// a comma ("onion, finely chopped" -> "onion"), anything in brackets,
+// and size words at the start ("large onions" -> "onions").
+function cleanIngredientName(text) {
+    // Brackets first - over and over, as some sites put brackets
+    // inside brackets: "(, or all purpose soy (Note 3))".
+    let withoutBrackets = text;
+    while (/\([^()]*\)/.test(withoutBrackets)) {
+        withoutBrackets = withoutBrackets.replace(/\([^()]*\)/g, ' ');
+    }
+    let name = withoutBrackets
+        .replace(/[()]/g, ' ')          // any stray bracket left over
+        .split(',')[0]                  // ", finely chopped"
+        .split(' / ')[0]                // "cornflour / corn starch" -> "cornflour"
+        .replace(/\s+plus\s.*$/i, '')   // "oil plus a little extra for frying"
+        .replace(/\s+(to serve|to taste|for serving|for garnish|optional)\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    name = name.replace(NAME_DESCRIPTORS, '');
+    return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function finishIngredient(text, quantity, unit) {
+    return {
+        ingredient_name: cleanIngredientName(text),
+        quantity: Math.round(quantity * 100) / 100,
+        unit
+    };
+}
+
+// Finds the Recipe inside a page's hidden data. Sites wrap it in
+// different ways - on its own, in a list, or inside a "@graph" with
+// other things about the page - so this looks through all of them.
+function findRecipeData(data) {
+    if (!data || typeof data !== 'object') return null;
+    if (Array.isArray(data)) {
+        for (const item of data) {
+            const found = findRecipeData(item);
+            if (found) return found;
+        }
+        return null;
+    }
+    const type = data['@type'];
+    if (type === 'Recipe' || (Array.isArray(type) && type.includes('Recipe'))) return data;
+    if (data['@graph']) return findRecipeData(data['@graph']);
+    if (data.mainEntity) return findRecipeData(data.mainEntity);
+    return null;
+}
+
+// Turns the recipe's steps into lines of text. They can be one big
+// block of text, a list of steps, or a list of SECTIONS that each
+// have their own list of steps ("For the sauce: ...").
+function instructionLines(instructions) {
+    if (!instructions) return [];
+    if (typeof instructions === 'string') {
+        return plainText(instructions.replace(/<\/(p|li)>|<br\s*\/?>/gi, '\n')).split(/\n+/);
+    }
+    if (Array.isArray(instructions)) {
+        return instructions.flatMap(instructionLines);
+    }
+    if (instructions.itemListElement) {
+        const heading = instructions.name ? [`${plainText(instructions.name)}:`] : [];
+        return heading.concat(instructionLines(instructions.itemListElement));
+    }
+    return [plainText(instructions.text || instructions.name || '')];
+}
+
+// "4", "4 servings", "Serves 4-6", ["4", "4 serves"] -> 4
+function servingsFromYield(recipeYield) {
+    const text = Array.isArray(recipeYield) ? recipeYield.join(' ') : String(recipeYield || '');
+    const match = text.match(/\d+/);
+    return match ? Number(match[0]) : '';
+}
+
+// Pulls the recipe out of a page's HTML, or gives back null if the
+// page doesn't have one hidden in it.
+function recipeFromHtml(html) {
+    const scripts = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+    for (const [, json] of scripts) {
+        let data;
+        try {
+            data = JSON.parse(json);
+        } catch (err) {
+            // Some sites leave raw line breaks inside their text, which
+            // isn't strictly allowed - try once more without them.
+            try { data = JSON.parse(json.replace(/[\r\n\t]+/g, ' ')); } catch (err2) { continue; }
+        }
+        const recipe = findRecipeData(data);
+        if (!recipe) continue;
+
+        return {
+            name: plainText(recipe.name),
+            servings: servingsFromYield(recipe.recipeYield),
+            ingredients: (recipe.recipeIngredient || recipe.ingredients || []).map(line => ({
+                ...parseIngredientLine(line),
+                original: plainText(line)   // shown under each row, so you can check it was read right
+            })),
+            instructions: instructionLines(recipe.recipeInstructions)
+                .map(line => line.trim())
+                .filter(Boolean)
+                .join('\n')
+        };
+    }
+    return null;
+}
+
+// Only real websites can be imported from - never this server itself
+// or anything else on the home network (a link like
+// http://192.168.1.1 would otherwise get the garage to go poking
+// around inside your own network).
+function isAllowedRecipeLink(link) {
+    let url;
+    try { url = new URL(link); } catch (err) { return false; }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
+    return !(host === 'localhost' || host.endsWith('.local') || host.endsWith('.localhost') ||
+        /^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(host) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+        host.startsWith('[') || /^\d+$/.test(host));
+}
+
+// Gets the recipe from a link. Tries a plain, quick download of the
+// page first. Some sites block that (they only let real browsers in),
+// so if no recipe turns up, it opens the page in a real browser - the
+// same way the price scrapers do - and tries again.
+async function importRecipeFromLink(link) {
+    try {
+        const response = await fetch(link, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml',
+                'Accept-Language': 'en-NZ,en;q=0.9'
+            },
+            redirect: 'follow',
+            signal: AbortSignal.timeout(15000)
+        });
+        if (response.ok) {
+            const recipe = recipeFromHtml(await response.text());
+            if (recipe) return recipe;
+        }
+    } catch (err) {
+        console.error('Quick recipe download failed, trying a real browser:', err.message);
+    }
+
+    const browser = await chromium.launch({ headless: false });
+    try {
+        const page = await browser.newPage();
+        await page.goto(link, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        // A moment for any "checking your browser" screen to finish.
+        await page.waitForTimeout(3000);
+        return recipeFromHtml(await page.content());
+    } finally {
+        await browser.close();
+    }
+}
+
+// =============================================================
+// MEAL PLANNER
+// =============================================================
+// One shared plan for the week, saved in meal_plan.csv - one row per
+// recipe planned, with the day and how many people it's for, e.g.
+//   monday, 1786093115133, 2
+// The Meal Planner page saves the WHOLE plan each time it changes.
+// -------------------------------------------------------------
+const MEAL_PLAN_FILE = 'meal_plan.csv';
+const MEAL_PLAN_HEADERS = ['day', 'recipe_id', 'people'];
+
+// Takes an amount from a recipe and turns it into the base unit the
+// house stock is counted in (g / ml / each), same as "I made this"
+// does - tins become their weight using the tin size table.
+function toStockUnit(quantity, unit, name, aliasLookup) {
+    if (isWeightUnit(unit)) return { quantity: toGrams(quantity, unit), unit: 'g' };
+    if (isVolumeUnit(unit)) return { quantity: toMilliliters(quantity, unit), unit: 'ml' };
+    if (isTinUnit(unit)) {
+        const tin = tinSizeFor(name, aliasLookup);
+        return { quantity: quantity * tin.quantity, unit: tin.unit };
+    }
+    return { quantity, unit };
+}
+
+// -------------------------------------------------------------
+// Works out the combined shopping list for the whole week's plan:
+// 1. every planned recipe's ingredients, scaled to how many people
+//    it's for (e.g. a recipe for 2, planned for 3 = 1.5 x the amounts)
+// 2. the same ingredient across different recipes is added together
+//    (matched the same way "I made this" matches names - aliases too)
+// 3. whatever's already in the house is taken off
+// Gives back one entry per ingredient, with how much is needed in
+// total, how much is in the house, and how much to buy (0 = got enough).
+// -------------------------------------------------------------
+function buildShoppingList(plan, recipes, inventory, aliasLookup) {
+    const recipesById = new Map(recipes.map(r => [r.id, r]));
+    const needed = new Map();
+
+    plan.forEach(entry => {
+        const recipe = recipesById.get(entry.recipe_id);
+        if (!recipe) return;
+        const scale = (Number(entry.people) || DEFAULT_SERVINGS) / (Number(recipe.servings) || DEFAULT_SERVINGS);
+
+        recipe.ingredients.forEach(ing => {
+            const key = canonicalKey(ing.ingredient_name, aliasLookup);
+
+            // tsp/tbsp: just need SOME in the house, not an amount.
+            if (SPOON_UNITS.includes(ing.unit)) {
+                const spoonKey = key + '|spoon';
+                if (!needed.has(spoonKey)) needed.set(spoonKey, { name: ing.ingredient_name, key, unit: 'spoon', quantity: 0, recipes: new Set() });
+                needed.get(spoonKey).recipes.add(recipe.name);
+                return;
+            }
+
+            const amount = toStockUnit(Number(ing.quantity) * scale, ing.unit, ing.ingredient_name, aliasLookup);
+            const mapKey = key + '|' + amount.unit;
+            if (!needed.has(mapKey)) {
+                needed.set(mapKey, { name: ing.ingredient_name, key, unit: amount.unit, quantity: 0, recipes: new Set(), inTins: false });
+            }
+            const item = needed.get(mapKey);
+            item.quantity += amount.quantity;
+            item.recipes.add(recipe.name);
+            if (isTinUnit(ing.unit)) item.inTins = true;
+        });
+    });
+
+    return [...needed.values()].map(item => {
+        const matching = inventory.filter(stock => canonicalKey(stock.name, aliasLookup) === item.key);
+
+        if (item.unit === 'spoon') {
+            const haveSome = matching.some(stock => Number(stock.quantity) > 0);
+            return { name: item.name, unit: 'spoon', needed: 0, have: haveSome ? 1 : 0, toBuy: haveSome ? 0 : 1, recipes: [...item.recipes] };
+        }
+
+        const have = matching
+            .filter(stock => stock.unit === item.unit)
+            .reduce((total, stock) => total + Number(stock.quantity), 0);
+        let toBuy = Math.max(0, item.quantity - have);
+        // You can't buy half an onion - round "each" up to whole ones.
+        if (item.unit === 'each') toBuy = Math.ceil(toBuy - 0.001);
+
+        const result = {
+            name: item.name,
+            unit: item.unit,
+            needed: roundTo2(item.quantity),
+            have: roundTo2(have),
+            toBuy: roundTo2(toBuy),
+            recipes: [...item.recipes]
+        };
+        // Tinned goods also say how many TINS to buy (rounded up).
+        if (item.inTins || isTinnedGood(item.name, aliasLookup)) {
+            result.tinsToBuy = Math.ceil(toBuy / tinSizeFor(item.name, aliasLookup).quantity - 0.001);
+        }
+        return result;
+    }).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// =============================================================
+// WATCH LIST - prices checked automatically every morning
+// =============================================================
+// Star a product on the Price Checker page and it goes into
+// watch_list.csv. Every morning (from WATCH_CHECK_HOUR, NZ time) the
+// server searches each watched product's store for it again, all by
+// itself, and saves today's price into prices.csv - exactly as if
+// you'd clicked Save. Over time that builds up the price history for
+// the graphs and the "price drop" badges.
+//
+// The check runs inside the server, so nothing extra needs setting
+// up on the garage. When it last ran is kept in
+// watch_check_status.json (in .gitignore), so it only runs once a
+// day even though the server restarts every hour.
+// -------------------------------------------------------------
+const WATCH_LIST_FILE = 'watch_list.csv';
+const WATCH_LIST_HEADERS = ['id', 'item_name', 'store', 'package_size', 'search_term', 'added_by', 'date_added'];
+const WATCH_STATUS_FILE = 'watch_check_status.json';
+
+// The daily check starts from 7am NZ time (at the next 15-minute
+// check after that).
+const WATCH_CHECK_HOUR = 7;
+
+// True while a check is running, so two can never run at once.
+let watchCheckRunning = false;
+
+function readWatchStatus() {
+    try {
+        return JSON.parse(fs.readFileSync(WATCH_STATUS_FILE, 'utf8'));
+    } catch (err) {
+        return {};   // never run yet
+    }
+}
+
+// Runs a function in the same one-at-a-time queue as every saved
+// change (see runOneAtATime), for changes that DON'T come from the
+// browser - like the morning check saving prices. task(done) must
+// call done() once it's finished.
+function runInWriteQueue(task) {
+    writeQueue = writeQueue.then(() => new Promise(resolve => {
+        try {
+            task(resolve);
+        } catch (err) {
+            console.error('Unexpected error while saving:', err);
+            resolve();
+        }
+    }));
+}
+
+// Is this saved price for this watched product? Matched on the store
+// and the supermarket's own product name (and the size, if both have
+// one), so a different product with a similar name never gets mixed in.
+function priceIsForWatchedItem(price, watched) {
+    const name = (price.original_name || price.item_name || '').toLowerCase();
+    if (price.store !== watched.store || name !== watched.item_name.toLowerCase()) return false;
+    return !price.package_size || !watched.package_size || price.package_size === watched.package_size;
+}
+
+// -------------------------------------------------------------
+// Adds each watched product's price history (one price per day - the
+// last one saved that day), plus:
+// - priceDrop: today's price is lower than the last time it was checked
+// - lowestSeen: it's the cheapest it's been (after at least 3 checks)
+// -------------------------------------------------------------
+function addWatchHistory(watchList, prices) {
+    return watchList.map(watched => {
+        const byDay = new Map();
+        prices
+            .filter(p => priceIsForWatchedItem(p, watched) && p.price !== '')
+            .sort((a, b) => new Date(a.date_checked) - new Date(b.date_checked))
+            .forEach(p => byDay.set(p.date_checked.slice(0, 10), { date: p.date_checked, price: Number(p.price) }));
+        const history = [...byDay.values()];
+
+        const latest = history[history.length - 1] || null;
+        const previous = history[history.length - 2] || null;
+        const earlierLowest = history.length > 1 ? Math.min(...history.slice(0, -1).map(h => h.price)) : null;
+
+        return {
+            ...watched,
+            history,
+            latest,
+            previous,
+            priceDrop: Boolean(latest && previous && latest.price < previous.price),
+            lowestSeen: Boolean(latest && history.length >= 3 && latest.price < earlierLowest)
+        };
+    });
+}
+
+// -------------------------------------------------------------
+// The morning check itself. Goes through the watch list ONE product
+// at a time (so the garage isn't running lots of browsers at once),
+// searches that product's store, finds the exact same product in the
+// results, and saves its price. Anything that can't be found today
+// (out of stock, renamed, store site down) is just skipped and noted
+// in the status file - it'll be tried again tomorrow.
+// -------------------------------------------------------------
+function runWatchListCheck() {
+    if (watchCheckRunning) return;
+    watchCheckRunning = true;
+    const { date } = nzDateAndTime();
+    console.log('Watch list check starting...');
+
+    readOptionalCsv(WATCH_LIST_FILE, async (err, watchList) => {
+        const results = {};
+        const newPrices = [];
+
+        if (!err) {
+            for (const watched of watchList) {
+                try {
+                    const found = await searchOneStore(watched.search_term || watched.item_name, watched.store);
+                    const match = found.find(r =>
+                        (r.name || '').toLowerCase() === watched.item_name.toLowerCase() &&
+                        (!watched.package_size || !r.packageSize || r.packageSize === watched.package_size)
+                    );
+                    if (!match) {
+                        results[watched.id] = 'not found';
+                        continue;
+                    }
+                    results[watched.id] = 'found';
+                    newPrices.push({
+                        // Same layout as the Save button's prices (see the
+                        // POST /prices route), with a unique id each.
+                        id: (Date.now() + newPrices.length).toString(),
+                        item_name: savedPriceName(match.name, match.store),
+                        price: match.price,
+                        cup_price: match.cupPrice,
+                        cup_measure: match.cupMeasure,
+                        package_size: match.packageSize,
+                        store: match.store,
+                        date_checked: new Date().toISOString(),
+                        original_name: match.name
+                    });
+                } catch (searchErr) {
+                    console.error(`Watch list: couldn't check ${watched.item_name} at ${watched.store}:`, searchErr.message);
+                    results[watched.id] = 'failed';
+                }
+            }
+        }
+
+        // Save all of today's prices in one go, then note that today's
+        // check is done.
+        runInWriteQueue(done => {
+            readPrices((err, prices) => {
+                const finish = () => {
+                    writeFileSafely(WATCH_STATUS_FILE, JSON.stringify({ date, finishedAt: new Date().toISOString(), results }, null, 2), () => {
+                        watchCheckRunning = false;
+                        console.log(`Watch list check finished - ${newPrices.length} price(s) saved.`);
+                        done();
+                    });
+                };
+                if (err || newPrices.length === 0) return finish();
+                savePrices(prices.concat(newPrices), saveErr => {
+                    if (saveErr) console.error('Watch list: could not save prices:', saveErr);
+                    finish();
+                });
+            });
+        });
+    });
+}
+
+// Every 15 minutes: if it's past WATCH_CHECK_HOUR and today's check
+// hasn't been done yet, start it.
+function maybeRunDailyWatchCheck() {
+    const { date, time } = nzDateAndTime();
+    if (Number(time.slice(0, 2)) < WATCH_CHECK_HOUR) return;
+    if (readWatchStatus().date === date) return;
+    runWatchListCheck();
+}
+setInterval(maybeRunDailyWatchCheck, 15 * 60 * 1000);
+// Also once, a minute after the server starts, in case it was off
+// (or restarting) at the time.
+setTimeout(maybeRunDailyWatchCheck, 60 * 1000);
+
 const server = http.createServer((req, res) => {
 
     // Parsed once here so any route below can read query string
@@ -1940,7 +2540,8 @@ const server = http.createServer((req, res) => {
                 recipes.push({
                     id: newId,
                     name: newRecipe.name,
-                    instructions: newRecipe.instructions
+                    instructions: newRecipe.instructions,
+                    servings: newRecipe.servings || ''
                 });
 
                 // Add one row per ingredient, all linked to this recipe's id
@@ -1976,6 +2577,7 @@ const server = http.createServer((req, res) => {
 
                 recipe.name = updatedRecipe.name;
                 recipe.instructions = updatedRecipe.instructions;
+                recipe.servings = updatedRecipe.servings || '';
 
                 // Remove this recipe's OLD ingredient rows, then add
                 // the new set. It's simpler and safer than trying to
@@ -2204,6 +2806,166 @@ const server = http.createServer((req, res) => {
                 });
             });
         }));
+        return;
+    }
+
+    // ---- Import a recipe from a link (see IMPORT A RECIPE above) ----
+    // e.g. /recipe-from-link?url=https://www.example.com/beef-tacos
+    // Only reads the recipe - nothing is saved until you press Save
+    // Recipe on the page.
+    if (parsedUrl.pathname === '/recipe-from-link' && req.method === 'GET') {
+        const link = String(parsedUrl.searchParams.get('url') || '').trim();
+        if (!isAllowedRecipeLink(link)) return sendText(res, 400, "That doesn't look like a website link");
+
+        importRecipeFromLink(link)
+            .then(recipe => {
+                if (!recipe) return sendText(res, 404, "Couldn't find a recipe on that page");
+                sendJson(res, recipe);
+            })
+            .catch(err => {
+                console.error('Recipe import failed:', err);
+                sendText(res, 500, "Couldn't open that page");
+            });
+        return;
+    }
+
+    // ---- Meal planner: the saved plan for the week ----
+    if (req.url === '/meal-plan' && req.method === 'GET') {
+        readOptionalCsv(MEAL_PLAN_FILE, (err, plan) => {
+            if (err) return sendText(res, 500, 'Could not read the meal plan');
+            sendJson(res, plan);
+        });
+        return;
+    }
+
+    // ---- Meal planner: save the WHOLE plan (replaces the old one) ----
+    // Body: { plan: [{ day: "monday", recipe_id: "123", people: 2 }, ...] }
+    if (req.url === '/meal-plan' && req.method === 'POST') {
+        readJsonBody(req, res, ({ plan }) => runOneAtATime(res, () => {
+            const rows = (Array.isArray(plan) ? plan : []).map(entry => ({
+                day: String(entry.day || ''),
+                recipe_id: String(entry.recipe_id || ''),
+                people: Number(entry.people) || DEFAULT_SERVINGS
+            })).filter(entry => entry.day && entry.recipe_id);
+
+            writeFileSafely(MEAL_PLAN_FILE, stringifyGenericCSV(MEAL_PLAN_HEADERS, rows), err => {
+                if (err) return sendText(res, 500, 'Could not save the meal plan');
+                sendJson(res, rows);
+            });
+        }));
+        return;
+    }
+
+    // ---- Meal planner: the combined shopping list for the week ----
+    // (see buildShoppingList above)
+    if (req.url === '/meal-plan/shopping-list' && req.method === 'GET') {
+        readOptionalCsv(MEAL_PLAN_FILE, (err, plan) => {
+            if (err) return sendText(res, 500, 'Could not read the meal plan');
+            readRecipes((err, recipes) => {
+                if (err) return sendText(res, 500, 'Could not read recipes');
+                readAllAliases((err, aliases) => {
+                    if (err) return sendText(res, 500, 'Could not read ingredient aliases');
+                    readAllInventory((err, inventory) => {
+                        if (err) return sendText(res, 500, 'Could not read inventory');
+                        sendJson(res, buildShoppingList(plan, recipes, inventory, buildAliasLookup(aliases)));
+                    });
+                });
+            });
+        });
+        return;
+    }
+
+    // ---- Watch list: every watched product, with its price history ----
+    // Also says when the morning check last ran, and whether one's
+    // running right now.
+    if (req.url === '/watch-list' && req.method === 'GET') {
+        readOptionalCsv(WATCH_LIST_FILE, (err, watchList) => {
+            if (err) return sendText(res, 500, 'Could not read the watch list');
+            readPrices((err, prices) => {
+                if (err) return sendText(res, 500, 'Could not read price history');
+                sendJson(res, {
+                    items: addWatchHistory(watchList, prices),
+                    lastCheck: readWatchStatus(),
+                    checking: watchCheckRunning
+                });
+            });
+        });
+        return;
+    }
+
+    // ---- Watch list: star a product ----
+    // Body: the product as shown in the search results, plus what was
+    // searched for (so the morning check can search for it again).
+    // Its current price is saved too, so the graph has a starting point.
+    if (req.url === '/watch-list' && req.method === 'POST') {
+        readJsonBody(req, res, product => runOneAtATime(res, () => {
+            if (!product.item_name || !product.store) return sendText(res, 400, 'Product name and store are needed');
+
+            readOptionalCsv(WATCH_LIST_FILE, (err, watchList) => {
+                if (err) return sendText(res, 500, 'Could not read the watch list');
+
+                // Already watching it? Nothing to add.
+                const already = watchList.find(w => priceIsForWatchedItem(
+                    { original_name: product.item_name, store: product.store, package_size: product.package_size }, w));
+                if (already) return sendJson(res, already);
+
+                const watched = {
+                    id: Date.now().toString(),
+                    item_name: product.item_name,
+                    store: product.store,
+                    package_size: product.package_size || '',
+                    search_term: product.search_term || product.item_name,
+                    added_by: loggedInAs,
+                    date_added: nzDateAndTime().date
+                };
+                watchList.push(watched);
+
+                writeFileSafely(WATCH_LIST_FILE, stringifyGenericCSV(WATCH_LIST_HEADERS, watchList), err => {
+                    if (err) return sendText(res, 500, 'Could not save the watch list');
+
+                    readPrices((err, prices) => {
+                        if (err || product.price === undefined) return sendJson(res, watched);
+                        prices.push({
+                            id: Date.now().toString(),
+                            item_name: savedPriceName(product.item_name, product.store),
+                            price: product.price,
+                            cup_price: product.cup_price,
+                            cup_measure: product.cup_measure,
+                            package_size: product.package_size,
+                            store: product.store,
+                            date_checked: new Date().toISOString(),
+                            original_name: product.item_name
+                        });
+                        savePrices(prices, () => sendJson(res, watched));
+                    });
+                });
+            });
+        }));
+        return;
+    }
+
+    // ---- Watch list: run the price check NOW (rather than waiting ----
+    // ---- for the morning). Replies straight away - the check carries
+    // ---- on in the background, as it can take a few minutes.
+    if (req.url === '/watch-list/check' && req.method === 'POST') {
+        const alreadyRunning = watchCheckRunning;
+        runWatchListCheck();
+        sendJson(res, { started: !alreadyRunning, alreadyRunning });
+        return;
+    }
+
+    // ---- Watch list: un-star a product ----
+    if (req.url.startsWith('/watch-list/') && req.method === 'DELETE') {
+        const watchId = req.url.replace('/watch-list/', '');
+        runOneAtATime(res, () => {
+            readOptionalCsv(WATCH_LIST_FILE, (err, watchList) => {
+                if (err) return sendText(res, 500, 'Could not read the watch list');
+                writeFileSafely(WATCH_LIST_FILE, stringifyGenericCSV(WATCH_LIST_HEADERS, watchList.filter(w => w.id !== watchId)), err => {
+                    if (err) return sendText(res, 500, 'Could not save the watch list');
+                    sendJson(res, { removed: watchId });
+                });
+            });
+        });
         return;
     }
 

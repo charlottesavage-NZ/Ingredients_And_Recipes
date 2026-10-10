@@ -13,6 +13,7 @@ const recipeList = document.getElementById('recipe-list');
 const recipeForm = document.getElementById('recipe-form');
 const recipeNameInput = document.getElementById('recipe-name');
 const recipeInstructionsInput = document.getElementById('recipe-instructions');
+const recipeServingsInput = document.getElementById('recipe-servings');
 const saveButton = recipeForm.querySelector('button[type="submit"]');
 
 // Keeps track of which recipe is currently being edited.
@@ -55,6 +56,63 @@ let voteFilterPopulated = false;
 let currentVoteFilter = '';
 let currentIngredientFilter = '';
 let currentNameFilter = '';
+
+// The "Sort by" dropdown - "" keeps the order recipes were saved in.
+let currentSort = '';
+
+// =============================================================
+// SERVINGS - cooking for 1, 2 or 3 people
+// =============================================================
+// Each recipe says how many people its amounts are for (its "Serves"
+// box - blank counts as DEFAULT_SERVINGS). The "Cooking for" dropdown
+// at the top scales EVERY recipe to that many people: the amounts
+// shown, the "Missing" check, and what "I made this" takes out.
+// e.g. a recipe that serves 2, cooking for 3 = 1.5 x every amount.
+// -------------------------------------------------------------
+const DEFAULT_SERVINGS = 2;
+
+// This browser remembers the last choice. (Wrapped in try/catch
+// because some private-browsing modes block saving it - then it just
+// starts on 2 each time.)
+let cookingFor = DEFAULT_SERVINGS;
+try {
+    cookingFor = Number(localStorage.getItem('cookingFor')) || DEFAULT_SERVINGS;
+} catch (err) { /* not allowed to read it - keep the default */ }
+
+// Rounds a scaled amount to something sensible to cook with:
+// - whole things (each / tins) to whole numbers - "8 eggs", not
+//   "7.5 eggs" - except under 2, where a half is kept ("0.5 onion")
+// - spoons to the nearest quarter - "0.75 tsp"
+// - grams / ml to whole numbers - "375 g", not "374.9999 g"
+// - kg / L to 2 decimal places
+function roundScaledAmount(quantity, unit) {
+    if (unit === 'each' || unit === 'tin') {
+        return quantity < 2 ? Math.max(0.5, Math.round(quantity * 2) / 2) : Math.round(quantity);
+    }
+    if (unit === 'tsp' || unit === 'tbsp') return Math.max(0.25, Math.round(quantity * 4) / 4);
+    if (unit === 'g' || unit === 'ml') return quantity >= 10 ? Math.round(quantity) : Math.round(quantity * 10) / 10;
+    return Math.round(quantity * 100) / 100;
+}
+
+// A recipe's ingredients, scaled from what it serves to how many
+// you're cooking for. Gives back a NEW list - the saved recipe itself
+// is never changed.
+function scaledIngredients(recipe) {
+    const scale = cookingFor / (Number(recipe.servings) || DEFAULT_SERVINGS);
+    if (scale === 1) return recipe.ingredients;
+    return recipe.ingredients.map(ing => ({
+        ...ing,
+        quantity: roundScaledAmount(Number(ing.quantity) * scale, ing.unit)
+    }));
+}
+
+const cookingForSelect = document.getElementById('cooking-for');
+cookingForSelect.value = String(cookingFor);
+cookingForSelect.addEventListener('change', () => {
+    cookingFor = Number(cookingForSelect.value);
+    try { localStorage.setItem('cookingFor', String(cookingFor)); } catch (err) { /* can't save - fine */ }
+    renderRecipes(filterRecipes(currentRecipes));
+});
 
 // -------------------------------------------------------------
 // Weight/volume conversion tables - same idea as script.js, but
@@ -414,12 +472,41 @@ function matchesNameFilter(recipe) {
 // currently set - any filter left blank/default is skipped.
 // -------------------------------------------------------------
 function filterRecipes(recipes) {
-    return recipes.filter(recipe =>
+    const filtered = recipes.filter(recipe =>
         matchesVoteFilter(recipe) &&
         matchesIngredientFilter(recipe) &&
         matchesNameFilter(recipe)
     );
+    return sortRecipes(filtered);
 }
+
+// -------------------------------------------------------------
+// Puts the (already filtered) recipes in the order picked in the
+// "Sort by" dropdown. Always sorts a COPY, so the saved order is
+// never lost.
+// - "fewest-missing" = "What can I make right now?": recipes you have
+//   everything for first, then the ones missing 1 thing, then 2...
+//   (worked out for however many people you're cooking for)
+// - "name-asc" = alphabetical
+// -------------------------------------------------------------
+function sortRecipes(recipes) {
+    const sorted = [...recipes];
+    if (currentSort === 'fewest-missing') {
+        const missingCount = new Map(sorted.map(recipe => [
+            recipe,
+            checkRecipeAvailability({ ...recipe, ingredients: scaledIngredients(recipe) }, currentInventory, aliasLookup).missing.length
+        ]));
+        sorted.sort((a, b) => missingCount.get(a) - missingCount.get(b));
+    } else if (currentSort === 'name-asc') {
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return sorted;
+}
+
+document.getElementById('recipe-sort').addEventListener('change', function(event) {
+    currentSort = event.target.value;
+    renderRecipes(filterRecipes(currentRecipes));
+});
 
 // Re-render using the currently loaded recipes whenever a filter
 // control changes - no need to re-fetch from the server, since
@@ -448,6 +535,9 @@ document.getElementById('clear-filters-btn').addEventListener('click', function(
     document.getElementById('vote-filter').value = '';
     document.getElementById('ingredient-filter').value = '';
     document.getElementById('name-filter').value = '';
+
+    currentSort = '';
+    document.getElementById('recipe-sort').value = '';
 
     renderRecipes(filterRecipes(currentRecipes));
 });
@@ -485,6 +575,16 @@ function addIngredientRow(existing = null) {
     // a plain input's value.
     row.querySelector('.ingredient-unit').value = unit;
 
+    // Imported from a website? Show the line exactly as the website
+    // wrote it underneath (e.g. "1 large onion, finely chopped"), so
+    // it's easy to check it was read correctly. Not saved anywhere.
+    if (existing && existing.original) {
+        const original = document.createElement('small');
+        original.classList.add('ingredient-original');
+        original.textContent = `Website said: ${existing.original}`;
+        row.appendChild(original);
+    }
+
     ingredientRowsContainer.appendChild(row);
 }
 
@@ -501,6 +601,7 @@ document.getElementById('add-ingredient-btn').addEventListener('click', () => ad
 // using this exact layout, then upload it here:
 //
 //   Title: Spaghetti Bolognese
+//   Serves: 2          <- optional, can be left out
 //   Ingredients:
 //   Beef mince, 500, g
 //   Tinned tomatoes, 400, g
@@ -567,6 +668,11 @@ function parseRecipeFile(fileText) {
     // The recipe name is whatever comes after "Title:" on that line.
     const name = lines[titleLineIndex].slice('title:'.length).trim();
 
+    // An optional "Serves: 4" line anywhere above Ingredients:
+    // (files without one still work - it's just left blank).
+    const servesLine = lines.slice(0, ingredientsLineIndex).find(line => line.toLowerCase().startsWith('serves:'));
+    const servings = servesLine ? (servesLine.match(/\d+/) || [''])[0] : '';
+
     // Ingredient lines sit between "Ingredients:" and "Instructions:".
     // Each one looks like "Name, quantity, unit" - split by comma,
     // same layout as the ingredient rows in the form.
@@ -597,7 +703,7 @@ function parseRecipeFile(fileText) {
         .join('\n')
         .trim();
 
-    return { name, instructions, ingredients };
+    return { name, servings, instructions, ingredients };
 }
 
 // -------------------------------------------------------------
@@ -609,6 +715,7 @@ function parseRecipeFile(fileText) {
 function fillFormFromParsedRecipe(parsed) {
     recipeNameInput.value = parsed.name;
     recipeInstructionsInput.value = parsed.instructions;
+    recipeServingsInput.value = parsed.servings || '';
 
     ingredientRowsContainer.innerHTML = "";
 
@@ -619,6 +726,49 @@ function fillFormFromParsedRecipe(parsed) {
         parsed.ingredients.forEach(ing => addIngredientRow(ing));
     }
 }
+
+// -------------------------------------------------------------
+// IMPORT FROM A LINK
+// Paste a link to a recipe website and the server reads the recipe
+// straight off the page (most recipe sites hide a computer-readable
+// copy of the recipe in their pages - see IMPORT A RECIPE FROM A LINK
+// in server.js). It comes back in exactly the same shape as an
+// uploaded file, so it fills the form the same way - nothing is saved
+// until you check it over and click "Save Recipe".
+// -------------------------------------------------------------
+const recipeLinkInput = document.getElementById('recipe-link-input');
+const recipeLinkBtn = document.getElementById('recipe-link-btn');
+const recipeLinkStatus = document.getElementById('recipe-link-status');
+
+recipeLinkBtn.addEventListener('click', function() {
+    const link = recipeLinkInput.value.trim();
+    if (!link) {
+        recipeLinkStatus.textContent = 'Paste a link to a recipe first.';
+        return;
+    }
+
+    recipeLinkBtn.disabled = true;
+    // Some sites only open in a real browser, which can take a bit.
+    recipeLinkStatus.textContent = 'Reading the recipe - this can take up to 30 seconds...';
+
+    fetch(`${SERVER_URL}/recipe-from-link?url=${encodeURIComponent(link)}`)
+        .then(response => {
+            if (!response.ok) return response.text().then(message => { throw new Error(message); });
+            return response.json();
+        })
+        .then(recipe => {
+            fillFormFromParsedRecipe(recipe);
+            recipeLinkInput.value = '';
+            recipeLinkStatus.textContent = `Got "${recipe.name}" - check the ingredients below (especially the units), then click Save Recipe.`;
+        })
+        .catch(error => {
+            console.error('Could not import recipe:', error);
+            recipeLinkStatus.textContent = `${error.message || "Couldn't read that recipe"} - you can still type it in, or use the upload instead.`;
+        })
+        .finally(() => {
+            recipeLinkBtn.disabled = false;
+        });
+});
 
 // -------------------------------------------------------------
 // Loads recipes, the combined inventory, AND the household member
@@ -739,12 +889,21 @@ function renderRecipes(recipes) {
         const card = document.createElement('div');
         card.classList.add('recipe-card');
 
+        // The amounts for however many people you're cooking for -
+        // see SERVINGS near the top of this file.
+        const ingredients = scaledIngredients(recipe);
+        const serves = Number(recipe.servings) || DEFAULT_SERVINGS;
+
         // Turn the ingredients array into a simple bullet list of text
-        const ingredientsHTML = recipe.ingredients
+        const ingredientsHTML = ingredients
             .map(ing => `<li>${escapeHtml(ing.ingredient_name)} — ${escapeHtml(ing.quantity)} ${escapeHtml(ing.unit === 'tin' && Number(ing.quantity) !== 1 ? 'tins' : ing.unit)}</li>`)
             .join('');
 
-        const availability = checkRecipeAvailability(recipe, currentInventory, aliasLookup);
+        // e.g. "Amounts for 3 people (recipe serves 2)"
+        const servingsNote = `Amounts for ${cookingFor} ${cookingFor === 1 ? 'person' : 'people'}`
+            + (serves === cookingFor ? '' : ` (recipe serves ${serves}${recipe.servings ? '' : ' - not set, so counted as 2'})`);
+
+        const availability = checkRecipeAvailability({ ...recipe, ingredients }, currentInventory, aliasLookup);
 
         // Show a clear yes/no plus, if missing anything, a list of
         // exactly what and how much more is needed.
@@ -764,6 +923,7 @@ function renderRecipes(recipes) {
         // when clicked we know exactly which recipe it refers to.
         card.innerHTML = `
             <h3>${escapeHtml(recipe.name)}</h3>
+            <p class="servings-note">${escapeHtml(servingsNote)}</p>
             <ul>${ingredientsHTML}</ul>
             ${renderInstructions(recipe.instructions)}
             ${availabilityHTML}
@@ -790,6 +950,7 @@ function startEditingRecipe(recipe) {
 
     recipeNameInput.value = recipe.name;
     recipeInstructionsInput.value = recipe.instructions;
+    recipeServingsInput.value = recipe.servings || '';
 
     // Clear the current ingredient rows and rebuild them from
     // this recipe's saved ingredients.
@@ -861,7 +1022,7 @@ recipeForm.addEventListener('submit', function(event) {
     fetch(url, {
         method: method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, instructions, ingredients })
+        body: JSON.stringify({ name, instructions, ingredients, servings: recipeServingsInput.value.trim() })
     })
         .then(response => response.json())
         .then(() => {
@@ -1075,7 +1236,10 @@ madeForm.addEventListener('submit', function(event) {
 // mis-click can't empty the pantry.
 // -------------------------------------------------------------
 function markRecipeAsMade(recipeId) {
-    sendMadeRequest(recipeId, false)
+    // The preview uses the amounts for however many people you're
+    // cooking for (see SERVINGS), so the pop-up starts with those.
+    const recipe = currentRecipes.find(r => r.id === recipeId);
+    sendMadeRequest(recipeId, false, recipe ? scaledIngredients(recipe) : undefined)
         .then(preview => openMadeDialog(recipeId, preview))
         .catch(error => {
             console.error('Could not mark recipe as made:', error);

@@ -10,10 +10,10 @@ const loginForm = document.getElementById('login-form');
 const loginError = document.getElementById('login-error');
 
 // The page to go back to after logging in - auth.js adds it to the
-// address as ?next=recipes.html. Only our own three pages are
+// address as ?next=recipes.html. Only our own pages are
 // allowed, so a dodgy link can't use this to send you off to some
 // other website after you log in.
-const ALLOWED_PAGES = ['index.html', 'recipes.html', 'price-checker.html'];
+const ALLOWED_PAGES = ['index.html', 'recipes.html', 'planner.html', 'price-checker.html'];
 const requestedPage = new URLSearchParams(location.search).get('next');
 const nextPage = ALLOWED_PAGES.includes(requestedPage) ? requestedPage : 'index.html';
 

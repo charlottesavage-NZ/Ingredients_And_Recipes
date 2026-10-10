@@ -18,6 +18,7 @@
             <nav class="main-nav">
                 <a href="index.html">Inventory</a>
                 <a href="recipes.html">Recipes</a>
+                <a href="planner.html">Meal Planner</a>
                 <a href="price-checker.html" aria-current="page">Price Checker</a>
             </nav>
         </header>
@@ -72,6 +73,21 @@
                 <!-- Filled in with one row per matching product once
                      a search finishes - starts empty. -->
                 <div id="price-search-results"></div>
+            </section>
+
+            <!-- ===================== WATCH LIST ===================== -->
+            <!-- Products you've starred (the "Watch" button on a search
+                 result). The garage checks their prices by itself every
+                 morning and saves them, so the price history and graphs
+                 build up without anyone searching. A "Price drop" badge
+                 shows when one's cheaper than last time. See WATCH LIST
+                 in price-checker.js and server.js. -->
+            <section id="watch-list-section" class="inventory-section">
+                <h2>Watch List</h2>
+                <!-- "Last checked 7:02am today" etc. -->
+                <p id="watch-list-status"></p>
+                <div id="watch-list"></div>
+                <button type="button" id="watch-check-btn">Check prices now</button>
             </section>
 
             <!-- ===================== SAVED PRICE HISTORY ===================== -->
