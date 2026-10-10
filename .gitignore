@@ -13,3 +13,4 @@ sessions.json
 
 # When the morning watch list price check last ran - see WATCH LIST in server.js.
 watch_check_status.json
+.claude/launch.json
