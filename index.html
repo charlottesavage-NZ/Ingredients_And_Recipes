@@ -11,6 +11,8 @@
     <!-- Checks this browser is logged in, and sends it to the login
          screen if not - loaded first, before anything else. See auth.js. -->
     <script src="auth.js"></script>
+    <!-- The "Removed Rice - Undo" message - see undo-toast.js. -->
+    <script src="undo-toast.js"></script>
 </head>
 
 <body>
@@ -42,6 +44,23 @@
                 <h2>What's in the House?</h2>
 
                 <!-- This is creating a form to collect user input. The id "house-form" lets your JavaScript attach an event listener to handle the user submissions. -->
+                <!-- ===================== SCAN A BARCODE ===================== -->
+                <!-- Opens the phone's camera to read a product's barcode,
+                     then fills in the form below for you (name, and the
+                     size if it's known). See the BARCODE part of script.js. -->
+                <button id="scan-barcode-btn" type="button">Scan a barcode</button>
+                <div id="barcode-panel" hidden>
+                    <!-- The camera picture shows up in here while scanning. -->
+                    <div id="barcode-reader"></div>
+                    <!-- If the camera won't start (e.g. the browser blocks
+                         it), you can take a photo of the barcode instead. -->
+                    <label for="barcode-photo" id="barcode-photo-label" hidden>Or take a photo of the barcode:</label>
+                    <input type="file" id="barcode-photo" accept="image/*" capture="environment" hidden>
+                    <button id="barcode-stop-btn" type="button">Stop scanning</button>
+                </div>
+                <!-- "Found: Wattie's Baked Beans" etc. - starts empty. -->
+                <p id="barcode-status"></p>
+
                 <form id="house-form">
 
                     <!-- This is adding two input types, for Item Name and Quantity.
@@ -83,6 +102,42 @@
 
                 <!-- Clear button sits below the form. This clears ALL items in ALL storage areas. -->
                 <button id="clear-all" type="button">Clear Entire House Inventory</button>
+
+                <!-- ===================== STOCK MINIMUMS ===================== -->
+                <!-- Hidden until you click the button. Only items you add
+                     here get checked - nothing else needs a minimum. When
+                     one drops below its minimum it shows in "Running Low"
+                     below. See the LOW STOCK part of script.js. -->
+                <button id="toggle-minimums-btn" type="button" aria-expanded="false" aria-controls="minimums-panel">Set stock minimums</button>
+                <div id="minimums-panel" hidden>
+                    <h3>Stock Minimums</h3>
+                    <p class="minimums-help">Pick an item and the least you always want in the house. Set it to 0 to stop checking it.</p>
+                    <form id="minimum-form">
+                        <label for="minimum-name">Item</label>
+                        <input type="text" id="minimum-name" placeholder="e.g. Tinned Tomatoes" required list="item-names-list">
+                        <label for="minimum-amount">Always want at least</label>
+                        <input type="number" id="minimum-amount" placeholder="e.g. 2" min="0" step="any" required>
+                        <select id="minimum-unit" aria-label="Unit">
+                            <option value="each">each</option>
+                            <option value="tin">tins</option>
+                            <option value="g">grams (g)</option>
+                            <option value="kg">kilograms (kg)</option>
+                            <option value="ml">millilitres (mL)</option>
+                            <option value="l">litres (L)</option>
+                        </select>
+                        <button type="submit">Save minimum</button>
+                    </form>
+                    <!-- Every minimum you've set, filled in by script.js. -->
+                    <ul id="minimums-list"></ul>
+                </div>
+
+            </section>
+
+            <!-- ===================== RUNNING LOW ===================== -->
+            <!-- Only shows up when something's below its minimum. -->
+            <section id="low-stock-section" class="inventory-section" hidden>
+                <h2>Running Low</h2>
+                <ul id="low-stock-list"></ul>
 
             </section>
 
@@ -126,6 +181,9 @@
     </div>
 
     <!-- This loads your JavaScript file. It should always be placed at the bottom of <body> -->
+    <!-- The barcode reader (html5-qrcode) is NOT loaded here - script.js
+         only loads it the first time you press "Scan a barcode", so
+         the page stays quick to open. -->
     <script src="script.js"></script>
 </body>
 </html>

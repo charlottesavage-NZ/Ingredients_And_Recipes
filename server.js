@@ -1515,6 +1515,239 @@ function checkLogin(username, password) {
     return person && typedPassword === typedName ? person : null;
 }
 
+// =============================================================
+// ACTIVITY LOG - "who changed what"
+// =============================================================
+// Every change to the house stock is written as one line in
+// activity_log.csv on the garage, e.g.
+//   2026-10-14, 18:05, Todd, Used (I made this), Mince, 500, g, Fridge, Beef Tacos
+// It's NOT shown anywhere on the website - it's just a record you
+// can open in Excel/Google Sheets on the garage (or copy off it),
+// and it's laid out like a spreadsheet so it can go straight into a
+// database later. Like the other CSVs it's in .gitignore, so the
+// hourly update never touches it.
+//
+// Lines are only ever ADDED to the end - nothing is rewritten - so
+// it's safe even with lots of changes happening at once.
+// -------------------------------------------------------------
+const ACTIVITY_LOG_FILE = 'activity_log.csv';
+const ACTIVITY_LOG_HEADERS = ['date', 'time', 'person', 'action', 'item', 'quantity', 'unit', 'location', 'details'];
+
+// The friendly name of each storage area, for the log.
+const SECTION_NAMES = {
+    pantry: 'Pantry',
+    fridge: 'Fridge',
+    freezer: 'Freezer (Inside)',
+    chest: 'Chest Freezer'
+};
+
+// Today's date and the time right now in NZ, e.g. "2026-10-14" and
+// "18:05". NZ time is asked for by name, so it's right even if the
+// garage server's own clock is set to a different time zone.
+function nzDateAndTime() {
+    const now = new Date();
+    const date = now.toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' });   // en-CA writes dates as YYYY-MM-DD
+    const time = now.toLocaleTimeString('en-GB', { timeZone: 'Pacific/Auckland', hour: '2-digit', minute: '2-digit' });
+    return { date, time };
+}
+
+// Adds one or more lines to the log. Each row is an object with any
+// of: action, item, quantity, unit, location, details. If the log
+// can't be written it's only reported in the server's output - a
+// logging problem should never stop the actual change from saving.
+function logActivity(person, rows) {
+    if (rows.length === 0) return;
+    const { date, time } = nzDateAndTime();
+
+    const lines = rows.map(row =>
+        ACTIVITY_LOG_HEADERS.map(header => {
+            if (header === 'date') return csvField(date);
+            if (header === 'time') return csvField(time);
+            if (header === 'person') return csvField(person);
+            return csvField(row[header]);
+        }).join(',')
+    ).join('\n') + '\n';
+
+    // First ever line? Put the column headings at the top first.
+    fs.access(ACTIVITY_LOG_FILE, err => {
+        const text = err ? ACTIVITY_LOG_HEADERS.join(',') + '\n' + lines : lines;
+        fs.appendFile(ACTIVITY_LOG_FILE, text, 'utf8', err => {
+            if (err) console.error('Could not write to the activity log:', err);
+        });
+    });
+}
+
+// =============================================================
+// UNDO - the "Removed Rice - Undo" message
+// =============================================================
+// Just before any change to the house stock is saved, a copy of the
+// storage areas it's about to change is kept here (in memory only).
+// Clicking Undo puts those copies back.
+//
+// Only the MOST RECENT change can be undone, and each change gets its
+// own code (undoId). The Undo button sends that code back, and if
+// anything else has changed since (e.g. Todd added something in the
+// meantime), the codes won't match and it says "too late" instead -
+// so an undo can never wipe out someone else's newer change.
+//
+// It's forgotten when the server restarts (e.g. the hourly update),
+// which is fine - the Undo button only shows for a few seconds.
+// -------------------------------------------------------------
+let lastChange = null;   // { undoId, person, description, savedCopies: { section: csvText } }
+
+// Takes the copies of the given storage areas, then hands back the
+// new undoId. Must be called INSIDE runOneAtATime, before saving.
+function rememberForUndo(sections, person, description, callback) {
+    Promise.all(sections.map(section => fs.promises.readFile(csvFiles[section], 'utf8')))
+        .then(texts => {
+            const savedCopies = {};
+            sections.forEach((section, index) => { savedCopies[section] = texts[index]; });
+            const undoId = crypto.randomBytes(8).toString('hex');
+            lastChange = { undoId, person, description, savedCopies };
+            callback(null, undoId);
+        }, err => callback(err, null));
+}
+
+// =============================================================
+// LOW STOCK - "always want 2 tins of tomatoes"
+// =============================================================
+// Saved in stock_minimums.csv - only the items you've CHOSEN to set
+// a minimum for are in there, everything else is left alone. The
+// minimum is stored in the same base unit as the stock itself
+// (grams / millilitres / each), so they can be compared directly -
+// e.g. "2 tins of tomatoes" is saved as 800 g.
+// -------------------------------------------------------------
+const STOCK_MINIMUMS_FILE = 'stock_minimums.csv';
+const STOCK_MINIMUM_HEADERS = ['name', 'minimum', 'unit'];
+
+// Reads a CSV file that might not exist yet (like the minimums,
+// before you've set any) - a missing file just means "nothing yet".
+function readOptionalCsv(filePath, callback) {
+    fs.readFile(filePath, 'utf8', (err, data) => {
+        if (err && err.code === 'ENOENT') return callback(null, []);
+        if (err) return callback(err, null);
+        callback(null, parseCSV(data));
+    });
+}
+
+// Every minimum, with how much is in the whole house right now
+// ("have") and whether that's below the minimum ("low"). Names are
+// matched the same way "I made this" matches them, so a minimum for
+// "Tinned Tomatoes" counts "Chopped Tomatoes" too if they're aliases.
+// Tinned goods also get a tin count for each, e.g. 2 tins.
+function readStockMinimums(callback) {
+    readOptionalCsv(STOCK_MINIMUMS_FILE, (err, minimums) => {
+        if (err) return callback(err, null);
+
+        readAllAliases((err, aliases) => {
+            if (err) return callback(err, null);
+            const aliasLookup = buildAliasLookup(aliases);
+
+            readAllInventory((err, inventoryItems) => {
+                if (err) return callback(err, null);
+
+                const results = minimums.map(min => {
+                    const key = canonicalKey(min.name, aliasLookup);
+                    const have = inventoryItems
+                        .filter(item => item.unit === min.unit && canonicalKey(item.name, aliasLookup) === key)
+                        .reduce((total, item) => total + Number(item.quantity), 0);
+
+                    const result = {
+                        name: min.name,
+                        minimum: Number(min.minimum),
+                        unit: min.unit,
+                        have: roundTo2(have),
+                        low: have < Number(min.minimum)
+                    };
+                    if (isTinnedGood(min.name, aliasLookup)) {
+                        const tinSize = tinSizeFor(min.name, aliasLookup).quantity;
+                        result.minimumTins = roundTo2(result.minimum / tinSize);
+                        result.haveTins = roundTo2(result.have / tinSize);
+                    }
+                    return result;
+                });
+
+                callback(null, results);
+            });
+        });
+    });
+}
+
+// =============================================================
+// BARCODES - scanning a product with the phone camera
+// =============================================================
+// The Inventory page reads the barcode with the camera, then asks the
+// server what the product is:
+// 1. First it checks barcodes.csv - every barcode you've added before
+//    is remembered there, with the name YOU used for it. So the
+//    second time you scan something it's instant, and it uses your
+//    wording ("Tinned Tomatoes", not "Pams Chopped Tomatoes In Juice").
+// 2. If it's not in there, it asks Open Food Facts - a free, public
+//    database of food products. It's run by volunteers, so NZ-only
+//    products (Pams etc.) are often missing - then you just type
+//    the name in once, and from then on it's remembered (step 1).
+// -------------------------------------------------------------
+const BARCODES_FILE = 'barcodes.csv';
+const BARCODE_HEADERS = ['barcode', 'name', 'quantity', 'unit', 'location'];
+
+// Open Food Facts asks every app to say who it is when it looks
+// something up.
+const OPEN_FOOD_FACTS_USER_AGENT = 'WhatFoodDoWeHave/1.0 (household pantry app)';
+
+// Turns Open Food Facts' size text into an amount and unit for the
+// form, e.g. "410 g" -> { quantity: 410, unit: 'g' }, "1.5 L" ->
+// { quantity: 1.5, unit: 'l' }. Anything else (e.g. "6 x 30g") gives
+// null and the boxes are just left for you to fill in.
+// Anything AFTER the size is ignored - European products often
+// have an "e" (the ℮ "estimated" mark) on the end, like "400 g e" -
+// and a comma counts as a decimal point ("1,5 l" = 1.5 L).
+function sizeFromOpenFoodFacts(sizeText) {
+    const match = String(sizeText || '').trim().toLowerCase().replace(',', '.').match(/^(\d*\.?\d+)\s*(g|kg|ml|l)\b/);
+    if (!match) return null;
+    return { quantity: Number(match[1]), unit: match[2] };
+}
+
+// Looks a barcode up on Open Food Facts. Gives back
+// { name, quantity, unit } or null if they don't have it.
+async function lookUpOpenFoodFacts(barcode) {
+    const response = await fetch(
+        `https://world.openfoodfacts.org/api/v2/product/${barcode}.json?fields=product_name,brands,quantity`,
+        { headers: { 'User-Agent': OPEN_FOOD_FACTS_USER_AGENT }, signal: AbortSignal.timeout(8000) }
+    );
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (data.status !== 1 || !data.product || !data.product.product_name) return null;
+
+    // e.g. brands "Wattie's,Heinz" + name "Baked Beans" -> "Wattie's Baked Beans"
+    // (unless the name already starts with the brand).
+    const brand = String(data.product.brands || '').split(',')[0].trim();
+    let name = data.product.product_name.trim();
+    if (brand && !name.toLowerCase().startsWith(brand.toLowerCase())) name = `${brand} ${name}`;
+
+    const size = sizeFromOpenFoodFacts(data.product.quantity);
+    return { name, quantity: size ? size.quantity : '', unit: size ? size.unit : '' };
+}
+
+// Remembers the name/amount/place you used for a barcode, so next
+// time it's filled in straight away (see step 1 above).
+function rememberBarcode(details, callback) {
+    readOptionalCsv(BARCODES_FILE, (err, barcodes) => {
+        if (err) return callback(err);
+        const others = barcodes.filter(b => b.barcode !== details.barcode);
+        others.push(details);
+        writeFileSafely(BARCODES_FILE, stringifyGenericCSV(BARCODE_HEADERS, others), callback);
+    });
+}
+
+// Writes an amount for the log/undo message, e.g. 500 + "g" ->
+// "500 g", 2 + "tin" -> "2 tins", 1 + "each" -> "1".
+function describeAmount(quantity, unit) {
+    if (unit === 'each' || !unit) return String(quantity);
+    if (isTinUnit(unit)) return `${quantity} ${Number(quantity) === 1 ? 'tin' : 'tins'}`;
+    return `${quantity} ${unit}`;
+}
+
 const server = http.createServer((req, res) => {
 
     // Parsed once here so any route below can read query string
@@ -1720,6 +1953,7 @@ const server = http.createServer((req, res) => {
                     });
                 });
 
+                logActivity(loggedInAs, [{ action: 'Added recipe', item: newRecipe.name }]);
                 saveRecipeFiles(res, recipes, ingredients, { id: newId, ...newRecipe });
             });
         }));
@@ -1757,6 +1991,7 @@ const server = http.createServer((req, res) => {
                     });
                 });
 
+                logActivity(loggedInAs, [{ action: 'Edited recipe', item: updatedRecipe.name }]);
                 saveRecipeFiles(res, recipes, otherIngredients, { id: recipeId, ...updatedRecipe });
             });
         }));
@@ -1779,6 +2014,8 @@ const server = http.createServer((req, res) => {
                 // to a recipe_id that no longer exists anywhere.
                 const remainingIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
 
+                const deletedRecipe = recipes.find(r => r.id === recipeId);
+                logActivity(loggedInAs, [{ action: 'Deleted recipe', item: deletedRecipe ? deletedRecipe.name : recipeId }]);
                 saveRecipeFiles(res, remainingRecipes, remainingIngredients, { deleted: recipeId });
             });
         });
@@ -1868,15 +2105,31 @@ const server = http.createServer((req, res) => {
                         const changedSections = new Set();
                         plan.deductions.forEach(d => d.taken.forEach(t => changedSections.add(t.section)));
 
-                        const saves = [...changedSections].map(section => new Promise((resolve, reject) => {
-                            const remaining = itemsBySection[section].filter(item => !usedUpItems.has(item));
-                            saveItems(section, remaining, err => err ? reject(err) : resolve());
-                        }));
+                        // Copies of those areas BEFORE saving, so the whole
+                        // "I made this" can be undone in one click.
+                        const description = `Took out the ingredients for ${recipe.name}`;
+                        rememberForUndo([...changedSections], loggedInAs, description, (err, undoId) => {
+                            if (err) return sendText(res, 500, 'Could not read inventory');
 
-                        Promise.all(saves).then(
-                            () => sendJson(res, { recipe: recipe.name, ...plan, saved: true }),
-                            () => sendText(res, 500, 'Could not save inventory')
-                        );
+                            const saves = [...changedSections].map(section => new Promise((resolve, reject) => {
+                                const remaining = itemsBySection[section].filter(item => !usedUpItems.has(item));
+                                saveItems(section, remaining, err => err ? reject(err) : resolve());
+                            }));
+
+                            Promise.all(saves).then(
+                                () => {
+                                    // One log line per item actually taken out.
+                                    const logRows = [];
+                                    plan.deductions.forEach(d => d.taken.forEach(t => logRows.push({
+                                        action: 'Used (I made this)', item: t.item, quantity: roundTo2(t.quantity),
+                                        unit: t.unit, location: SECTION_NAMES[t.section], details: recipe.name
+                                    })));
+                                    logActivity(loggedInAs, logRows);
+                                    sendJson(res, { recipe: recipe.name, ...plan, saved: true, undoId, description });
+                                },
+                                () => sendText(res, 500, 'Could not save inventory')
+                            );
+                        });
                     });
                 });
             });
@@ -1954,6 +2207,180 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // ---- UNDO the most recent change to the house stock ----
+    // Sends back the undoId it was given with that change. Only works
+    // if nothing else has changed since - see the UNDO section above.
+    if (req.url === '/undo' && req.method === 'POST') {
+        readJsonBody(req, res, ({ undoId }) => runOneAtATime(res, () => {
+            if (!lastChange || lastChange.undoId !== undoId) {
+                return sendText(res, 409, "Too late to undo - something else has changed since");
+            }
+
+            const change = lastChange;
+            const restores = Object.entries(change.savedCopies).map(([section, text]) => new Promise((resolve, reject) => {
+                writeFileSafely(csvFiles[section], text, err => err ? reject(err) : resolve());
+            }));
+
+            Promise.all(restores).then(() => {
+                lastChange = null;
+                logActivity(loggedInAs, [{ action: 'Undo', details: `Undid: ${change.description}` }]);
+                sendJson(res, { undone: change.description });
+            }, () => sendText(res, 500, 'Could not undo'));
+        }));
+        return;
+    }
+
+    // ---- Clear EVERY storage area at once ("Clear Entire House Inventory") ----
+    // One request for all four (rather than one each), so the whole
+    // clear-out can be undone in one go.
+    if (req.url === '/inventory-all' && req.method === 'DELETE') {
+        runOneAtATime(res, () => {
+            const sections = Object.keys(csvFiles);
+            rememberForUndo(sections, loggedInAs, 'Cleared the entire house inventory', (err, undoId) => {
+                if (err) return sendText(res, 500, 'Could not read inventory');
+
+                const clears = sections.map(section => new Promise((resolve, reject) => {
+                    saveItems(section, [], err => err ? reject(err) : resolve());
+                }));
+
+                Promise.all(clears).then(() => {
+                    logActivity(loggedInAs, [{ action: 'Cleared everything', details: 'Cleared the entire house inventory' }]);
+                    sendJson(res, { undoId, description: 'Cleared the entire house inventory' });
+                }, () => sendText(res, 500, 'Could not clear inventory'));
+            });
+        });
+        return;
+    }
+
+    // ---- Low stock: every minimum you've set, and whether it's low ----
+    if (req.url === '/stock-minimums' && req.method === 'GET') {
+        readStockMinimums((err, minimums) => {
+            if (err) return sendText(res, 500, 'Could not read stock minimums');
+            sendJson(res, minimums);
+        });
+        return;
+    }
+
+    // ---- Low stock: set (or change, or remove) one item's minimum ----
+    // A minimum of 0 or blank removes it. Sends back the full updated
+    // list, same as the GET above.
+    if (req.url === '/stock-minimums' && req.method === 'POST') {
+        readJsonBody(req, res, ({ name, minimum, unit }) => runOneAtATime(res, () => {
+            name = String(name || '').trim();
+            if (!name) return sendText(res, 400, 'Item name is needed');
+
+            readAllAliases((err, aliases) => {
+                if (err) return sendText(res, 500, 'Could not read ingredient aliases');
+                const aliasLookup = buildAliasLookup(aliases);
+
+                // Same unit conversions as adding stock, so it can be
+                // compared with what's in the house - see the POST
+                // section route below.
+                let amount = Number(minimum) || 0;
+                if (isTinUnit(unit)) {
+                    const tin = tinSizeFor(name, aliasLookup);
+                    amount = amount * tin.quantity;
+                    unit = tin.unit;
+                }
+                if (isWeightUnit(unit)) { amount = toGrams(amount, unit); unit = 'g'; }
+                if (isVolumeUnit(unit)) { amount = toMilliliters(amount, unit); unit = 'ml'; }
+
+                readOptionalCsv(STOCK_MINIMUMS_FILE, (err, minimums) => {
+                    if (err) return sendText(res, 500, 'Could not read stock minimums');
+
+                    // Replaces any minimum already set for this item.
+                    const others = minimums.filter(m => m.name.toLowerCase() !== name.toLowerCase());
+                    if (amount > 0) others.push({ name, minimum: roundTo2(amount), unit });
+
+                    writeFileSafely(STOCK_MINIMUMS_FILE, stringifyGenericCSV(STOCK_MINIMUM_HEADERS, others), err => {
+                        if (err) return sendText(res, 500, 'Could not save stock minimums');
+                        logActivity(loggedInAs, [amount > 0
+                            ? { action: 'Set minimum', item: name, quantity: roundTo2(amount), unit }
+                            : { action: 'Removed minimum', item: name }]);
+                        readStockMinimums((err, updated) => {
+                            if (err) return sendText(res, 500, 'Could not read stock minimums');
+                            sendJson(res, updated);
+                        });
+                    });
+                });
+            });
+        }));
+        return;
+    }
+
+    // ---- Barcode lookup: what product is this barcode? ----
+    // e.g. /barcode?code=9300657000124 -> { name, quantity, unit, location, source }
+    // source is "saved" (you've added it before), "openfoodfacts", or
+    // "unknown" (not found anywhere - type the name in yourself).
+    if (parsedUrl.pathname === '/barcode' && req.method === 'GET') {
+        const barcode = String(parsedUrl.searchParams.get('code') || '').replace(/\D/g, '');
+        if (!barcode) return sendText(res, 400, 'No barcode given');
+
+        readOptionalCsv(BARCODES_FILE, async (err, barcodes) => {
+            if (err) return sendText(res, 500, 'Could not read barcodes');
+
+            const saved = barcodes.find(b => b.barcode === barcode);
+            if (saved) return sendJson(res, { ...saved, source: 'saved' });
+
+            try {
+                const found = await lookUpOpenFoodFacts(barcode);
+                if (found) return sendJson(res, { barcode, ...found, location: '', source: 'openfoodfacts' });
+            } catch (err) {
+                // Open Food Facts didn't answer in time, or is down -
+                // treat it the same as "not found".
+                console.error('Open Food Facts lookup failed:', err.message);
+            }
+            sendJson(res, { barcode, name: '', quantity: '', unit: '', location: '', source: 'unknown' });
+        });
+        return;
+    }
+
+    // ---- Barcode: remember the name you used for a scanned product ----
+    if (req.url === '/barcodes' && req.method === 'POST') {
+        readJsonBody(req, res, ({ barcode, name, quantity, unit, location }) => runOneAtATime(res, () => {
+            barcode = String(barcode || '').replace(/\D/g, '');
+            if (!barcode || !name) return sendText(res, 400, 'Barcode and name are needed');
+
+            rememberBarcode({ barcode, name, quantity, unit, location }, err => {
+                if (err) return sendText(res, 500, 'Could not save barcode');
+                sendJson(res, { barcode, name });
+            });
+        }));
+        return;
+    }
+
+    // ---- Remove ONE item from a storage area completely ----
+    // e.g. POST /pantry/remove with { name: "Rice", unit: "g" }
+    const removeMatch = req.url.match(/^\/(\w+)\/remove$/);
+    if (removeMatch && csvFiles[removeMatch[1]] && req.method === 'POST') {
+        const removeFrom = removeMatch[1];
+
+        readJsonBody(req, res, ({ name, unit }) => runOneAtATime(res, () => {
+            readItems(removeFrom, (err, items) => {
+                if (err) return sendText(res, 500, 'Could not read ' + csvFiles[removeFrom]);
+
+                const isThisItem = i => i.name.toLowerCase() === String(name).toLowerCase() && i.unit === unit;
+                const removed = items.find(isThisItem);
+                if (!removed) return sendText(res, 404, 'Item not found');
+
+                const description = `Removed ${removed.name} from ${SECTION_NAMES[removeFrom]}`;
+                rememberForUndo([removeFrom], loggedInAs, description, (err, undoId) => {
+                    if (err) return sendText(res, 500, 'Could not read ' + csvFiles[removeFrom]);
+
+                    saveItems(removeFrom, items.filter(i => !isThisItem(i)), err => {
+                        if (err) return sendText(res, 500, 'Could not save ' + csvFiles[removeFrom]);
+                        logActivity(loggedInAs, [{
+                            action: 'Removed', item: removed.name, quantity: removed.quantity,
+                            unit: removed.unit, location: SECTION_NAMES[removeFrom]
+                        }]);
+                        sendJson(res, { undoId, description });
+                    });
+                });
+            });
+        }));
+        return;
+    }
+
     // req.url looks like "/pantry" - strip the leading slash to get
     // just the section name.
     const section = req.url.replace('/', '');
@@ -1982,6 +2409,13 @@ const server = http.createServer((req, res) => {
         readJsonBody(req, res, newItem => runOneAtATime(res, () => readAllAliases((err, aliases) => {
             if (err) return sendText(res, 500, 'Could not read ingredient aliases');
             const aliasLookup = buildAliasLookup(aliases);
+
+            // The amount EXACTLY as typed (e.g. 2 tins), kept before
+            // the conversions below - used for the activity log and the
+            // "Added 2 tins Tomatoes - Undo" message, since that's what
+            // you'd recognise.
+            const typedQuantity = Number(newItem.quantity);
+            const typedUnit = newItem.unit;
 
             // If this item was entered in TINS, turn it into its weight
             // (or volume) right away - e.g. 10 tins of tomatoes becomes
@@ -2032,9 +2466,31 @@ const server = http.createServer((req, res) => {
                     items.push(newItem);
                 }
 
-                saveItems(section, items, (err) => {
-                    if (err) return sendText(res, 500, 'Could not save ' + csvFiles[section]);
-                    sendJson(res, addTinCounts(items, aliasLookup));
+                // e.g. "Added 2 tins Tomatoes to Pantry" or, for a
+                // negative amount, "Took 500 g Rice out of Pantry".
+                const amountText = describeAmount(Math.abs(typedQuantity), typedUnit);
+                const description = typedQuantity >= 0
+                    ? `Added ${amountText} ${newItem.name} to ${SECTION_NAMES[section]}`
+                    : `Took ${amountText} ${newItem.name} out of ${SECTION_NAMES[section]}`;
+
+                // A copy of the section BEFORE this change, for Undo.
+                rememberForUndo([section], loggedInAs, description, (err, undoId) => {
+                    if (err) return sendText(res, 500, 'Could not read ' + csvFiles[section]);
+
+                    saveItems(section, items, (err) => {
+                        if (err) return sendText(res, 500, 'Could not save ' + csvFiles[section]);
+                        logActivity(loggedInAs, [{
+                            action: typedQuantity >= 0 ? 'Added' : 'Took out',
+                            item: newItem.name, quantity: typedQuantity, unit: typedUnit,
+                            location: SECTION_NAMES[section]
+                        }]);
+                        // The list stays the reply (so nothing else that
+                        // uses it changes); the undo details ride along
+                        // in these two headers instead.
+                        res.setHeader('X-Undo-Id', undoId);
+                        res.setHeader('X-Undo-Description', encodeURIComponent(description));
+                        sendJson(res, addTinCounts(items, aliasLookup));
+                    });
                 });
             });
         })));
@@ -2044,9 +2500,20 @@ const server = http.createServer((req, res) => {
     // ---- DELETE: clear this section back to empty ----
     if (req.method === 'DELETE') {
         runOneAtATime(res, () => {
-            saveItems(section, [], (err) => {
-                if (err) return sendText(res, 500, 'Could not clear ' + csvFiles[section]);
-                sendJson(res, []);
+            // (The Inventory page now uses DELETE /inventory-all to
+            // clear everything in one go - this one-area clear is still
+            // here, and still logged and undo-able, in case it's used.)
+            const description = `Cleared ${SECTION_NAMES[section]}`;
+            rememberForUndo([section], loggedInAs, description, (err, undoId) => {
+                if (err) return sendText(res, 500, 'Could not read ' + csvFiles[section]);
+
+                saveItems(section, [], (err) => {
+                    if (err) return sendText(res, 500, 'Could not clear ' + csvFiles[section]);
+                    logActivity(loggedInAs, [{ action: 'Cleared', location: SECTION_NAMES[section] }]);
+                    res.setHeader('X-Undo-Id', undoId);
+                    res.setHeader('X-Undo-Description', encodeURIComponent(description));
+                    sendJson(res, []);
+                });
             });
         });
         return;

@@ -1051,9 +1051,12 @@ madeForm.addEventListener('submit', function(event) {
     madeConfirmBtn.disabled = true;
 
     sendMadeRequest(madeRecipeId, true, ingredients)
-        .then(() => {
+        .then(result => {
             madeDialog.close();
             loadEverything();
+            // "Took out the ingredients for Beef Tacos - Undo", in case
+            // it was the wrong recipe - see undo-toast.js.
+            showUndoToast(result.description, result.undoId, loadEverything);
         })
         .catch(error => {
             console.error('Could not mark recipe as made:', error);

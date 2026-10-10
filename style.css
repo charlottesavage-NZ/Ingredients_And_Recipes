@@ -759,3 +759,136 @@ option {
 #login-error:empty {
     display: none;
 }
+
+/* ===================== INVENTORY EXTRAS ===================== */
+
+/* The small "Remove" button at the end of each stock item (and each
+   stock minimum) - a quiet red outline, small enough not to clutter
+   the list, but still easy to tap on a phone. */
+button.remove-item-btn {
+    margin: 0 0 0 10px;
+    padding: 3px 9px;
+    font-size: 13px;
+    font-weight: normal;
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid rgba(255, 138, 128, 0.5);
+}
+
+button.remove-item-btn:hover {
+    background: rgba(255, 138, 128, 0.12);
+}
+
+/* Each stock item sits on one line with its Remove button, wrapping
+   neatly on a narrow phone screen. */
+#pantry-list li,
+#fridge-list li,
+#freezer-list li,
+#chest-list li,
+#minimums-list li {
+    margin-bottom: 8px;
+}
+
+/* The "Low" tag next to an item that's below its minimum. */
+.low-tag {
+    margin-left: 8px;
+    padding: 1px 7px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #22123f;
+    background: var(--warning);
+}
+
+/* "Running Low" box - a warning-coloured edge so it stands out. */
+#low-stock-section {
+    border-left: 4px solid var(--warning);
+}
+
+/* The "Set stock minimums" and "Scan a barcode" buttons are quieter
+   outline buttons, like Edit/Cancel elsewhere - Add Item stays the
+   main button. */
+#toggle-minimums-btn,
+#scan-barcode-btn,
+#barcode-stop-btn {
+    background: transparent;
+    color: var(--purple-light);
+    border: 1px solid var(--purple-light);
+    margin-right: 8px;
+}
+
+#toggle-minimums-btn:hover,
+#scan-barcode-btn:hover,
+#barcode-stop-btn:hover {
+    background: var(--purple-soft);
+}
+
+#scan-barcode-btn {
+    margin: 0 0 12px;
+}
+
+/* The minimums panel, once it's opened. */
+#minimums-panel {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.minimums-help,
+#barcode-status {
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-bottom: 10px;
+}
+
+#minimums-list {
+    margin-top: 14px;
+}
+
+/* The live camera picture while scanning a barcode. */
+#barcode-reader {
+    width: 100%;
+    max-width: 420px;
+    margin-bottom: 8px;
+}
+
+#barcode-panel {
+    margin-bottom: 10px;
+}
+
+#barcode-panel input[type="file"]:not([hidden]) {
+    display: block;
+    margin: 6px 0;
+}
+
+/* ===================== UNDO MESSAGE ===================== */
+
+/* The "Removed Rice from Pantry - Undo" bar along the bottom of the
+   screen - see undo-toast.js. */
+#undo-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    width: calc(100% - 32px);
+    max-width: 560px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 12px 16px;
+    background: var(--card-solid);
+    border: 1px solid var(--purple-light);
+    color: var(--text);
+    font-size: 15px;
+    z-index: 100;
+}
+
+#undo-toast[hidden] {
+    display: none;
+}
+
+#undo-toast button {
+    margin: 0;
+    padding: 6px 14px;
+    flex-shrink: 0;
+}
