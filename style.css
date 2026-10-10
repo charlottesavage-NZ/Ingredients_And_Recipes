@@ -1289,3 +1289,70 @@ ul.shopping-list li .add-to-row label {
 #purchased-btn {
     margin-bottom: 12px;
 }
+
+/* ===================== EDIT / DELETE ON STOCK ITEMS ===================== */
+
+/* The small square "E" (edit) and "D" (delete) buttons at the end of
+   each stock item - the same size, side by side, so the list stays
+   tidy. Hover shows "Edit Rice" / "Delete Rice". */
+button.item-letter-btn {
+    width: 26px;
+    height: 24px;
+    padding: 0;
+    margin: 0 0 0 6px;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 22px;
+    text-align: center;
+    vertical-align: middle;
+}
+
+/* The first of the two keeps the gap after the item's text. */
+button.item-letter-btn.edit-item-btn {
+    margin-left: 10px;
+    background: transparent;
+    color: var(--purple-light);
+    border: 1px solid rgba(180, 169, 255, 0.5);
+}
+
+button.item-letter-btn.edit-item-btn:hover {
+    background: var(--purple-soft);
+}
+
+/* A stock item while it's being edited - the boxes sit in a row and
+   wrap onto two lines on a phone. */
+li.editing-item {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    padding: 6px 0;
+}
+
+li.editing-item input[type="text"] {
+    flex: 2 1 160px;
+}
+
+li.editing-item input[type="number"] {
+    flex: 0 1 90px;
+    width: 90px;
+}
+
+li.editing-item select {
+    flex: 0 1 auto;
+}
+
+li.editing-item button {
+    margin-top: 0;
+    padding: 7px 12px;
+}
+
+button.cancel-edit-btn {
+    background: transparent;
+    color: var(--purple-light);
+    border: 1px solid var(--purple-light);
+}
+
+button.cancel-edit-btn:hover {
+    background: var(--purple-soft);
+}

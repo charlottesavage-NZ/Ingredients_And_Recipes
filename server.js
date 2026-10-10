@@ -3214,6 +3214,77 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // ---- Edit ONE item: fix its name, amount or unit, or move it ----
+    // ---- to a different storage area ----
+    // e.g. POST /fridge/edit with
+    //   { original: { name: "Mlik", unit: "ml" },
+    //     name: "Milk", quantity: 2, unit: "l", location: "fridge" }
+    // The amount is converted the same way Add Item does (2 L -> 2000 ml,
+    // tins -> grams). If the place it ends up in already has the same
+    // thing (same name and unit), the two are added together rather
+    // than listed twice. An amount of 0 just removes it.
+    // Can be undone, and goes in the activity log.
+    const editMatch = req.url.match(/^\/(\w+)\/edit$/);
+    if (editMatch && csvFiles[editMatch[1]] && req.method === 'POST') {
+        const editFrom = editMatch[1];
+
+        readJsonBody(req, res, ({ original, name, quantity, unit, location }) => runOneAtATime(res, () => {
+            name = String(name || '').trim();
+            const editTo = csvFiles[location] ? location : editFrom;
+            if (!original || !name) return sendText(res, 400, 'Item name is needed');
+
+            readAllAliases((err, aliases) => {
+                if (err) return sendText(res, 500, 'Could not read ingredient aliases');
+                const aliasLookup = buildAliasLookup(aliases);
+
+                readEachSection((err, itemsBySection) => {
+                    if (err) return sendText(res, 500, 'Could not read inventory');
+
+                    const isOriginal = i => i.name.toLowerCase() === String(original.name).toLowerCase() && i.unit === original.unit;
+                    const before = itemsBySection[editFrom].find(isOriginal);
+                    if (!before) return sendText(res, 404, 'Item not found - it may have just been changed by someone else');
+
+                    const amount = toStockUnit(Number(quantity) || 0, unit, name, aliasLookup);
+                    const changedSections = [...new Set([editFrom, editTo])];
+                    const description = `Edited ${before.name}` + (editTo !== editFrom ? ` (moved to ${SECTION_NAMES[editTo]})` : '');
+
+                    // Copies of the area(s) BEFORE the change, for Undo.
+                    rememberForUndo(changedSections, loggedInAs, description, (err, undoId) => {
+                        if (err) return sendText(res, 500, 'Could not read inventory');
+
+                        // Take the old version out...
+                        itemsBySection[editFrom] = itemsBySection[editFrom].filter(i => !isOriginal(i));
+
+                        // ...and put the new version in (unless it's now 0).
+                        if (amount.quantity > 0) {
+                            const target = itemsBySection[editTo];
+                            const sameThing = target.find(i => i.name.toLowerCase() === name.toLowerCase() && i.unit === amount.unit);
+                            if (sameThing) {
+                                sameThing.quantity = roundTo2(Number(sameThing.quantity) + amount.quantity);
+                            } else {
+                                target.push({ name, quantity: roundTo2(amount.quantity), unit: amount.unit });
+                            }
+                        }
+
+                        const saves = changedSections.map(section => new Promise((resolve, reject) => {
+                            saveItems(section, itemsBySection[section], err => err ? reject(err) : resolve());
+                        }));
+
+                        Promise.all(saves).then(() => {
+                            logActivity(loggedInAs, [{
+                                action: 'Edited', item: name, quantity: roundTo2(amount.quantity), unit: amount.unit,
+                                location: SECTION_NAMES[editTo],
+                                details: `Was ${before.name}, ${before.quantity} ${before.unit}, ${SECTION_NAMES[editFrom]}`
+                            }]);
+                            sendJson(res, { undoId, description });
+                        }, () => sendText(res, 500, 'Could not save inventory'));
+                    });
+                });
+            });
+        }));
+        return;
+    }
+
     // ---- Remove ONE item from a storage area completely ----
     // e.g. POST /pantry/remove with { name: "Rice", unit: "g" }
     const removeMatch = req.url.match(/^\/(\w+)\/remove$/);

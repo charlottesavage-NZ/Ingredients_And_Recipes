@@ -190,20 +190,129 @@ function setupInventory(sectionName) {
                 li.appendChild(lowTag);
             }
 
+            // Two small square buttons at the end of the line:
+            // E = edit it (fix the name/amount, or move it somewhere
+            // else - see startEditingItem below), D = delete it.
+            // (These used to be one wider "Remove" button - shortened to
+            // single letters so the list doesn't get cluttered. Hovering
+            // shows what each one does, and screen readers read out the
+            // full "Edit Rice" / "Delete Rice".)
+            const editButton = document.createElement('button');
+            editButton.type = 'button';
+            editButton.classList.add('item-letter-btn', 'edit-item-btn');
+            editButton.textContent = 'E';
+            editButton.title = `Edit ${item.name}`;
+            editButton.setAttribute('aria-label', `Edit ${item.name}`);
+            editButton.addEventListener('click', () => startEditingItem(li, item, display));
+            li.appendChild(editButton);
+
             // A small "Remove" button to take this one item out
             // completely (with an Undo message straight after, in
             // case it was a mis-tap).
             const removeButton = document.createElement('button');
             removeButton.type = 'button';
-            removeButton.classList.add('remove-item-btn');
-            removeButton.textContent = 'Remove';
-            removeButton.setAttribute('aria-label', `Remove ${item.name}`);
+            removeButton.classList.add('item-letter-btn', 'remove-item-btn');
+            removeButton.textContent = 'D';
+            removeButton.title = `Delete ${item.name}`;
+            removeButton.setAttribute('aria-label', `Delete ${item.name}`);
             removeButton.addEventListener('click', () => removeItem(item));
             li.appendChild(removeButton);
 
             // Add the <li> to the list in the HTML
             list.appendChild(li);
         });
+    }
+
+    // -------------------------------------------------------------
+    // "E" - swaps the item's line for a small form: name, amount,
+    // unit and which storage area it's in, with Save and Cancel. The
+    // amount starts in the same friendly unit it's shown in (e.g.
+    // 1.5 kg, not 1500 g). Saving sends it to the server (POST
+    // /pantry/edit etc. - see server.js), then shows the Undo message.
+    // -------------------------------------------------------------
+    function startEditingItem(li, item, display) {
+        li.innerHTML = '';
+        li.classList.add('editing-item');
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = item.name;
+        nameInput.setAttribute('aria-label', 'Item name');
+        nameInput.setAttribute('list', 'item-names-list');
+
+        const quantityInput = document.createElement('input');
+        quantityInput.type = 'number';
+        quantityInput.step = 'any';
+        quantityInput.min = '0';
+        quantityInput.value = display.quantity;
+        quantityInput.setAttribute('aria-label', 'Amount');
+
+        // Same unit choices as the Add Item form at the top.
+        const unitSelect = document.createElement('select');
+        unitSelect.setAttribute('aria-label', 'Unit');
+        unitSelect.innerHTML = document.getElementById('item-unit').innerHTML;
+        // display.unit is "kg"/"L"/"g"/"ml"/"each" - the dropdown's values are lowercase.
+        unitSelect.value = String(display.unit).toLowerCase();
+
+        const locationSelect = document.createElement('select');
+        locationSelect.setAttribute('aria-label', 'Where it is');
+        locationSelect.innerHTML = document.getElementById('item-location').innerHTML;
+        locationSelect.value = sectionName;
+
+        const saveButton = document.createElement('button');
+        saveButton.type = 'button';
+        saveButton.textContent = 'Save';
+
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.classList.add('cancel-edit-btn');
+        cancelButton.textContent = 'Cancel';
+        // Cancel just re-draws the list - nothing was sent anywhere.
+        cancelButton.addEventListener('click', () => renderItems());
+
+        saveButton.addEventListener('click', () => {
+            const newName = nameInput.value.trim();
+            if (!newName) {
+                alert('The item needs a name.');
+                return;
+            }
+            saveButton.disabled = true;
+
+            fetch(`${SERVER_URL}/${sectionName}/edit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    original: { name: item.name, unit: item.unit },
+                    name: newName,
+                    quantity: Number(quantityInput.value),
+                    unit: unitSelect.value,
+                    location: locationSelect.value
+                })
+            })
+                .then(response => {
+                    if (!response.ok) return response.text().then(message => { throw new Error(message); });
+                    return response.json();
+                })
+                .then(({ undoId, description }) => {
+                    // It might have moved to a different area, so reload
+                    // all four (and the low stock list) - not just this one.
+                    reloadEverything();
+                    showUndoToast(description, undoId, reloadEverything);
+                })
+                .catch(error => {
+                    console.error(`Could not edit item in ${sectionName}:`, error);
+                    alert(`Couldn't save that change - ${error.message || 'try again in a moment'}.`);
+                    saveButton.disabled = false;
+                });
+        });
+
+        li.appendChild(nameInput);
+        li.appendChild(quantityInput);
+        li.appendChild(unitSelect);
+        li.appendChild(locationSelect);
+        li.appendChild(saveButton);
+        li.appendChild(cancelButton);
+        nameInput.focus();
     }
 
     // -------------------------------------------------------------
