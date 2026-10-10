@@ -956,8 +956,16 @@ function describeMadeRow(deduction, typedAmount) {
     const fromText = 'From: ' + places.join(', then ');
 
     if (typedInBase > deduction.available) {
+        // For recipes measured in tins, say how many tins that is as
+        // well, e.g. "Only 4.8 kg / 12 tins in the house".
+        let availableText = describeAmount(deduction.available, deduction.unit);
+        if (deduction.recipeUnit === 'tin') {
+            const tinsAvailable = Math.round((deduction.available / tinSizeFor(deduction.ingredient).quantity) * 10) / 10;
+            availableText += ` / ${tinsAvailable} ${tinsAvailable === 1 ? 'tin' : 'tins'}`;
+        }
+
         return {
-            text: `Only ${describeAmount(deduction.available, deduction.unit)} in the house - it'll all be used. ${fromText}`,
+            text: `Only ${availableText} in the house - it'll all be used. ${fromText}`,
             warning: true
         };
     }

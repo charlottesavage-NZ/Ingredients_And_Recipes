@@ -986,7 +986,14 @@ async function searchWoolworths(searchTerm, storeName) {
                 if (!price) return;
 
                 rows.push({
-                    name: item.productName,
+                    // Woolworths USUALLY already starts the name with the
+                    // brand ("Wattie's Baked Beans 420g Can"), but it also
+                    // sends the brand separately - so it's only added on
+                    // the front when the name doesn't already start with
+                    // it, rather than showing "Wattie's Wattie's...".
+                    name: item.brand && !item.productName.toLowerCase().startsWith(item.brand.toLowerCase())
+                        ? `${item.brand} ${item.productName}`
+                        : item.productName,
                     // What you actually pay for this variant.
                     price: price.sellingPrice,
                     // Woolworths' own comparison price, e.g. 16.45
@@ -1111,7 +1118,11 @@ async function searchPakNSave(searchTerm, storeName) {
         const comparativePrice = singlePrice.comparativePrice || {};
 
         return {
-            name: product.name,
+            // Pak'nSave keeps the brand ("Pams", "Pams Value", "Wattie's")
+            // in its OWN field, separate from the product name - so it's
+            // added on the front here, otherwise "Pams Baked Beans" just
+            // showed up as "Baked Beans In Rich Tomato Sauce".
+            name: [product.brand, product.name].filter(Boolean).join(' '),
             // Pak'nSave gives prices in CENTS (1849 = $18.49), unlike
             // Woolworths' plain decimal dollars - divide by 100.
             price: typeof singlePrice.price === 'number' ? singlePrice.price / 100 : null,

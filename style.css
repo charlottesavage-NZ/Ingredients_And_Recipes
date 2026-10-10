@@ -65,6 +65,20 @@ body {
     background: rgba(255, 255, 255, 0.4);
 }
 
+/* On a phone, the big page title (e.g. "Price Checker") was too
+   wide and got cut off at the edge - shrink it a bit and tighten
+   the spacing so it fits. Big screens are unaffected. */
+@media (max-width: 480px) {
+    .header {
+        padding: 15px 0;
+        font-size: 1.7em;
+    }
+
+    .main-nav {
+        gap: 8px;
+    }
+}
+
 /* This controls the main layout area where all sections appear.
    We stack everything vertically because we now have one input box and four lists. */
 main {
@@ -170,6 +184,59 @@ input[type="number"] {
 
 .price-results-table button {
     margin-top: 0;
+}
+
+/* ===================== SAVED PRICE HISTORY ===================== */
+
+/* The "Search saved prices" box stretches across the section. */
+#price-history-filter {
+    width: 100%;
+    margin-bottom: 15px;
+}
+
+/* One box per product, with a divider between them - the same
+   look as the recipe cards. */
+.price-group {
+    padding: 10px 0 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.price-group:last-child {
+    border-bottom: none;
+}
+
+/* Product name and its date dropdown sit side by side on a wide
+   screen, and the dropdown drops underneath on a narrow phone
+   screen (flex-wrap) instead of squashing the name. */
+.price-group-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.price-group-header h3 {
+    margin: 0;
+    flex: 1 1 220px;
+}
+
+.price-group .price-results-table {
+    margin-top: 8px;
+}
+
+/* On a phone, tighten up the table so all four columns fit
+   without needing to scroll sideways. */
+@media (max-width: 480px) {
+    .price-group .price-results-table th,
+    .price-group .price-results-table td {
+        padding: 6px 4px;
+        font-size: 0.9em;
+    }
+
+    .price-group-header select {
+        width: 100%;
+    }
 }
 
 /* ===================== RECIPE CARDS ===================== */

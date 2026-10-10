@@ -217,94 +217,189 @@ function savePrice(result) {
         });
 }
 
+// Every saved price, as last loaded from the server - kept here so
+// typing in the filter box can re-draw the list without re-fetching.
+let allSavedPrices = [];
+
 // -------------------------------------------------------------
 // Loads and displays every price you've ever saved, most recently
 // checked first, as a table matching the search results above.
+//
+// Rather than one endless list, saves are GROUPED by product: one
+// box per product, showing its most recent check by default, with a
+// dropdown to look back at any earlier date it was checked. The CSV
+// itself is unchanged - still one row per save - this only changes
+// how it's shown on the page.
 // -------------------------------------------------------------
 function loadPriceHistory() {
     fetch(`${SERVER_URL}/prices`)
         .then(response => response.json())
         .then(prices => {
-            historyContainer.innerHTML = "";
-
-            if (prices.length === 0) {
-                historyContainer.innerHTML = "<p>No saved prices yet.</p>";
-                return;
-            }
-
-            // IDs are timestamps, so sorting by id descending puts
-            // the most recently saved entries at the top.
-            const sorted = [...prices].sort((a, b) => Number(b.id) - Number(a.id));
-
-            // Reuses the same "price-results-table" styling as the
-            // live search results, so both tables look consistent.
-            const table = document.createElement('table');
-            table.classList.add('price-results-table');
-
-            const thead = document.createElement('thead');
-            thead.innerHTML = `
-                <tr>
-                    <th>Item</th>
-                    <th>Size</th>
-                    <th>Price</th>
-                    <th>Unit Price</th>
-                    <th>Store</th>
-                    <th>Checked</th>
-                </tr>
-            `;
-            table.appendChild(thead);
-
-            const tbody = document.createElement('tbody');
-
-            sorted.forEach(entry => {
-                const row = document.createElement('tr');
-
-                // Same three-way logic as the live search results
-                // above - a real calculated/official unit price, a
-                // plain size with no price, or nothing at all.
-                let unitPriceText;
-                if (entry.cup_price && entry.cup_measure) {
-                    unitPriceText = `$${entry.cup_price} / ${entry.cup_measure}`;
-                } else if (entry.cup_measure) {
-                    unitPriceText = entry.cup_measure;
-                } else {
-                    unitPriceText = "—";
-                }
-                const checkedDate = new Date(entry.date_checked).toLocaleDateString();
-
-                const nameCell = document.createElement('td');
-                nameCell.textContent = entry.item_name;
-
-                const sizeCell = document.createElement('td');
-                sizeCell.textContent = entry.package_size || "—";
-
-                const priceCell = document.createElement('td');
-                priceCell.textContent = `$${entry.price}`;
-
-                const unitPriceCell = document.createElement('td');
-                unitPriceCell.textContent = unitPriceText;
-
-                const storeCell = document.createElement('td');
-                storeCell.textContent = entry.store;
-
-                const dateCell = document.createElement('td');
-                dateCell.textContent = checkedDate;
-
-                row.appendChild(nameCell);
-                row.appendChild(sizeCell);
-                row.appendChild(priceCell);
-                row.appendChild(unitPriceCell);
-                row.appendChild(storeCell);
-                row.appendChild(dateCell);
-                tbody.appendChild(row);
-            });
-
-            table.appendChild(tbody);
-            historyContainer.appendChild(table);
+            allSavedPrices = prices;
+            renderPriceHistory();
         })
         .catch(error => {
             console.error('Could not load price history:', error);
         });
 }
+
+// Turns a saved date into a plain "which day" key (e.g. "2026-10-10")
+// in YOUR time zone, so two saves on the same day group together.
+function dayKey(isoDate) {
+    const d = new Date(isoDate);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// -------------------------------------------------------------
+// Draws the grouped history (see loadPriceHistory above), narrowed
+// down to products whose name matches the filter box, if anything's
+// typed in it.
+// -------------------------------------------------------------
+function renderPriceHistory() {
+    historyContainer.innerHTML = "";
+
+    if (allSavedPrices.length === 0) {
+        historyContainer.innerHTML = "<p>No saved prices yet.</p>";
+        return;
+    }
+
+    // IDs are timestamps, so sorting by id descending puts
+    // the most recently saved entries at the top.
+    const sorted = [...allSavedPrices].sort((a, b) => Number(b.id) - Number(a.id));
+
+    const filterText = historyFilterInput.value.trim().toLowerCase();
+
+    // Group every save by product name. Because the list is already
+    // newest-first, the most recently checked product ends up first,
+    // and each group's own saves are newest-first too.
+    const groups = new Map();
+    sorted.forEach(entry => {
+        if (filterText && !entry.item_name.toLowerCase().includes(filterText)) return;
+        if (!groups.has(entry.item_name)) groups.set(entry.item_name, []);
+        groups.get(entry.item_name).push(entry);
+    });
+
+    if (groups.size === 0) {
+        historyContainer.innerHTML = "<p>No saved prices match that search.</p>";
+        return;
+    }
+
+    groups.forEach((entries, itemName) => {
+        const box = document.createElement('div');
+        box.classList.add('price-group');
+
+        // Every day this product was checked, newest first - these
+        // become the options in its date dropdown.
+        const days = [...new Set(entries.map(e => dayKey(e.date_checked)))];
+
+        const header = document.createElement('div');
+        header.classList.add('price-group-header');
+
+        const title = document.createElement('h3');
+        title.textContent = itemName;
+
+        const dateSelect = document.createElement('select');
+        dateSelect.setAttribute('aria-label', `Date checked for ${itemName}`);
+        days.forEach((day, index) => {
+            const option = document.createElement('option');
+            option.value = day;
+            const firstSaveThatDay = entries.find(e => dayKey(e.date_checked) === day);
+            // Written out as e.g. "11 Aug 2026", so there's no mixing up
+            // NZ day/month order with American month/day order.
+            const label = new Date(firstSaveThatDay.date_checked)
+                .toLocaleDateString('en-NZ', { day: 'numeric', month: 'short', year: 'numeric' });
+            option.textContent = label + (index === 0 ? ' (latest)' : '');
+            dateSelect.appendChild(option);
+        });
+
+        header.appendChild(title);
+        header.appendChild(dateSelect);
+        box.appendChild(header);
+
+        const tableHolder = document.createElement('div');
+        box.appendChild(tableHolder);
+
+        // Re-draws just this product's table whenever its date changes.
+        const showDay = day => {
+            tableHolder.innerHTML = '';
+            tableHolder.appendChild(buildHistoryTable(entries.filter(e => dayKey(e.date_checked) === day)));
+        };
+        dateSelect.addEventListener('change', () => showDay(dateSelect.value));
+        showDay(days[0]);
+
+        historyContainer.appendChild(box);
+    });
+}
+
+// -------------------------------------------------------------
+// Builds the small table for ONE product on ONE day - one row per
+// store. If the same store was saved more than once that day, only
+// the latest save is shown (entries are already newest-first).
+// -------------------------------------------------------------
+function buildHistoryTable(entriesForDay) {
+    // Reuses the same "price-results-table" styling as the
+    // live search results, so both tables look consistent.
+    const table = document.createElement('table');
+    table.classList.add('price-results-table');
+
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+        <tr>
+            <th>Store</th>
+            <th>Size</th>
+            <th>Price</th>
+            <th>Unit Price</th>
+        </tr>
+    `;
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    const storesShown = new Set();
+
+    entriesForDay.forEach(entry => {
+        if (storesShown.has(entry.store)) return;
+        storesShown.add(entry.store);
+
+        const row = document.createElement('tr');
+
+        // Same three-way logic as the live search results
+        // above - a real calculated/official unit price, a
+        // plain size with no price, or nothing at all.
+        let unitPriceText;
+        if (entry.cup_price && entry.cup_measure) {
+            unitPriceText = `$${entry.cup_price} / ${entry.cup_measure}`;
+        } else if (entry.cup_measure) {
+            unitPriceText = entry.cup_measure;
+        } else {
+            unitPriceText = "—";
+        }
+
+        const storeCell = document.createElement('td');
+        storeCell.textContent = entry.store;
+
+        const sizeCell = document.createElement('td');
+        sizeCell.textContent = entry.package_size || "—";
+
+        const priceCell = document.createElement('td');
+        priceCell.textContent = `$${entry.price}`;
+
+        const unitPriceCell = document.createElement('td');
+        unitPriceCell.textContent = unitPriceText;
+
+        row.appendChild(storeCell);
+        row.appendChild(sizeCell);
+        row.appendChild(priceCell);
+        row.appendChild(unitPriceCell);
+        tbody.appendChild(row);
+    });
+
+    table.appendChild(tbody);
+    return table;
+}
+
+// Typing in the "Search saved prices" box narrows the list down
+// straight away - no need to ask the server again.
+const historyFilterInput = document.getElementById('price-history-filter');
+historyFilterInput.addEventListener('input', renderPriceHistory);
 
 loadPriceHistory();

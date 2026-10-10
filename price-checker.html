@@ -47,6 +47,12 @@
             <!-- ===================== SAVED PRICE HISTORY ===================== -->
             <section id="price-history-section" class="inventory-section">
                 <h2>Saved Prices</h2>
+
+                <!-- Narrows the saved prices down to products whose name
+                     contains what's typed (e.g. "beans"). Each product
+                     below has its own date dropdown for older checks. -->
+                <input type="text" id="price-history-filter" placeholder="Search saved prices e.g. Beans">
+
                 <div id="price-history-list"></div>
             </section>
         </main>
