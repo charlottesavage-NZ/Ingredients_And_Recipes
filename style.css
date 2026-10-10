@@ -3,16 +3,23 @@
 /* All the main colours in one place, so the whole look can be
    changed from here. Used throughout the rest of this file as
    var(--name). The purple matches the page's background gradient. */
+/* This is a DARK purple theme - deep purple cards with soft light
+   text, rather than bright white boxes, so it's easy on the eyes. */
 :root {
-    --purple: #5b4fcf;          /* buttons, links, highlights */
-    --purple-dark: #4a3fb5;     /* button hover */
-    --purple-soft: #efedfb;     /* light purple tint for hovers/badges */
-    --text: #2b2840;            /* main text - a soft near-black */
-    --text-muted: #6b6882;      /* secondary/hint text */
-    --border: #e4e1ef;          /* lines between rows, input borders */
-    --card: #ffffff;            /* the white boxes everything sits in */
-    --warning: #b45309;         /* "not enough" / "couldn't reach" warnings */
-    --danger: #c0392b;          /* delete / clear-everything buttons */
+    color-scheme: dark;         /* tells the browser to draw its own bits (scrollbars, dropdown lists) dark too */
+    --purple: #7a69ee;          /* buttons, links, highlights */
+    --purple-dark: #6754e0;     /* button hover */
+    --purple-light: #b4a9ff;    /* outlined buttons and focus glow on the dark cards */
+    --purple-soft: rgba(180, 169, 255, 0.14); /* faint purple tint for hovers */
+    --text: #f1eefc;            /* main text - a soft off-white, not pure white */
+    --text-muted: #bdb5e3;      /* secondary/hint text - a muted lavender */
+    --border: rgba(255, 255, 255, 0.12); /* lines between rows, input borders */
+    --card: rgba(34, 22, 72, 0.78);      /* the deep purple boxes everything sits in (slightly see-through) */
+    --card-solid: #261a52;      /* same colour, fully solid - for the pop-up box */
+    --input: rgba(12, 6, 32, 0.45);      /* inside of text boxes and dropdowns */
+    --warning: #fbbf5a;         /* "not enough" / "couldn't reach" warnings */
+    --danger: #ff8a80;          /* delete / clear-everything buttons */
+    --success: #7ee2a8;         /* "You can make this!" */
     --radius: 12px;             /* rounded corners on boxes */
 }
 
@@ -35,7 +42,10 @@ body {
 
     /* This is the background gradient, the start, middle and stop colours.
        It covers the entire page because body has min-height: 100vh. */
-    background: linear-gradient(135deg, #6a74e0 0%, #7451a8 100%);
+    /* (Starts with the original lighter purple at the top, then
+       deepens into a dark purple further down, so it's gentler on
+       the eyes the further you scroll.) */
+    background: linear-gradient(170deg, #667eea 0%, #764ba2 38%, #3a1f6e 72%, #22123f 100%);
     background-attachment: fixed;
 
     min-height: 100vh; /* ensures the gradient fills the screen */
@@ -100,10 +110,11 @@ body {
 
 /* The page you're currently on - white "pill" so you can see where
    you are. Each page marks its own link with aria-current="page". */
+/* (Now a soft lavender pill rather than bright white.) */
 .main-nav a[aria-current="page"] {
-    background: white;
-    color: var(--purple);
-    border-color: white;
+    background: rgba(255, 255, 255, 0.85);
+    color: #4a3aa8;
+    border-color: transparent;
 }
 
 /* On a phone, the big page title (e.g. "Price Checker") was too
@@ -144,17 +155,17 @@ main {
    This is the frosted-glass effect box that sits on top of the gradient.
    backdrop-filter only works if the background is transparent behind it,
    which is why .container must be transparent. */
-/* (Now a solid white card with a soft shadow instead - dark text on
-   white is far easier to read than dark text on see-through purple.
-   The purple still shows all around the cards.) */
+/* (Now a deep purple card - slightly see-through, so the frosted
+   glass effect is back - with soft light text and a gentle shadow.
+   Much easier on the eyes than a bright white box.) */
 .inventory-section {
-    background: var(--card);                    /* semi-transparent white box */ /* (now solid white) */
+    background: var(--card);                    /* semi-transparent white box */ /* (now semi-transparent deep purple) */
     backdrop-filter: blur(12px);           /* frosted glass effect */
     -webkit-backdrop-filter: blur(12px);   /* Safari support */
     border-radius: var(--radius);               /* rounded corners */
     padding: 22px;                              /* internal spacing */
-    border: 1px solid rgba(255, 255, 255, 0.6); /* subtle border to define the box */
-    box-shadow: 0 6px 20px rgba(40, 20, 90, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.1); /* subtle border to define the box */
+    box-shadow: 0 8px 24px rgba(10, 4, 30, 0.35);
 }
 
 @media (max-width: 480px) {
@@ -240,14 +251,14 @@ button:hover {
    accident. */
 #clear-all,
 button.delete-recipe-btn {
-    background: white;
+    background: transparent;
     color: var(--danger);
     border: 1px solid var(--danger);
 }
 
 #clear-all:hover,
 button.delete-recipe-btn:hover {
-    background: #fdecea;
+    background: rgba(255, 138, 128, 0.12);
 }
 
 /* "Quieter" buttons (Edit, Like/Dislike, Cancel, Clear Filters, + Add Ingredient) -
@@ -257,9 +268,9 @@ button.vote-btn,
 #made-cancel-btn,
 #clear-filters-btn,
 #add-ingredient-btn {
-    background: white;
-    color: var(--purple);
-    border: 1px solid var(--purple);
+    background: transparent;
+    color: var(--purple-light);
+    border: 1px solid var(--purple-light);
 }
 
 button.edit-recipe-btn:hover,
@@ -275,7 +286,7 @@ select {
     padding: 9px 10px;
     border-radius: 8px;
     border: 1px solid var(--border);
-    background-color: white;
+    background-color: var(--input);
     color: var(--text);
     font-family: inherit;
     font-size: 0.95rem;
@@ -288,7 +299,7 @@ textarea {
     padding: 9px 10px;
     border-radius: 8px;
     border: 1px solid var(--border);
-    background: white;
+    background: var(--input);
     color: var(--text);
     font-family: inherit;
     font-size: 0.95rem;
@@ -300,8 +311,19 @@ input:focus,
 select:focus,
 textarea:focus {
     outline: none;
-    border-color: var(--purple);
-    box-shadow: 0 0 0 3px rgba(91, 79, 207, 0.18);
+    border-color: var(--purple-light);
+    box-shadow: 0 0 0 3px rgba(180, 169, 255, 0.22);
+}
+
+/* Faded placeholder text ("e.g. Mince") inside the dark boxes. */
+::placeholder {
+    color: rgba(241, 238, 252, 0.4);
+}
+
+/* The open list of choices in a dropdown matches the dark theme. */
+option {
+    background: var(--card-solid);
+    color: var(--text);
 }
 
 /* The "No matches in this section" message shown when a search
@@ -340,7 +362,7 @@ textarea:focus {
 /* A light purple highlight on the row your mouse is over, to help
    your eye follow it across the table. */
 .price-results-table tbody tr:hover {
-    background: #faf9fe;
+    background: rgba(255, 255, 255, 0.04);
 }
 
 .price-results-table button {
@@ -620,23 +642,23 @@ textarea:focus {
 /* The pop-up box itself - a solid version of the same purple as the
    page, so it's readable on top of everything else. Capped in width
    for big screens, but never wider than the screen on a phone. */
-/* (Now white like the rest of the cards, with dark text.) */
+/* (Now the same deep purple as the cards, fully solid.) */
 .made-dialog {
     margin: auto;
     width: min(560px, calc(100vw - 32px));
     max-height: calc(100vh - 32px);
     padding: 22px;
-    border: none;
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: var(--radius);
-    background: var(--card);
+    background: var(--card-solid);
     color: var(--text);
     font-family: inherit;
-    box-shadow: 0 20px 50px rgba(20, 10, 50, 0.35);
+    box-shadow: 0 20px 50px rgba(5, 2, 20, 0.6);
 }
 
 /* Greys out the page behind the pop-up while it's open. */
 .made-dialog::backdrop {
-    background: rgba(30, 20, 60, 0.5);
+    background: rgba(8, 4, 24, 0.6);
 }
 
 .made-dialog h3 {
@@ -692,7 +714,7 @@ textarea:focus {
 
 .can-make {
     font-weight: 600;
-    color: #2e7d4f;
+    color: var(--success);
 }
 
 /* Votes are short "Name: emoji" entries, not a real list - drop
