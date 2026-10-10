@@ -221,6 +221,10 @@ function savePrice(result) {
 // typing in the filter box can re-draw the list without re-fetching.
 let allSavedPrices = [];
 
+// How many products the Saved Prices list shows when you're NOT
+// searching - change this number to show more or fewer.
+const MAX_RECENT_PRODUCTS = 10;
+
 // -------------------------------------------------------------
 // Loads and displays every price you've ever saved, most recently
 // checked first, as a table matching the search results above.
@@ -284,7 +288,21 @@ function renderPriceHistory() {
         return;
     }
 
-    groups.forEach((entries, itemName) => {
+    // Unless you're searching, only the 10 most recently checked
+    // products are shown, so the page doesn't turn into an endless
+    // scroll. Searching looks through EVERYTHING. This only affects
+    // what's shown - every save is still kept in prices.csv.
+    let groupsToShow = [...groups];
+    if (!filterText && groupsToShow.length > MAX_RECENT_PRODUCTS) {
+        groupsToShow = groupsToShow.slice(0, MAX_RECENT_PRODUCTS);
+
+        const note = document.createElement('p');
+        note.classList.add('price-history-note');
+        note.textContent = `Showing the ${MAX_RECENT_PRODUCTS} most recently checked products (out of ${groups.size}) - search above to find older ones.`;
+        historyContainer.appendChild(note);
+    }
+
+    groupsToShow.forEach(([itemName, entries]) => {
         const box = document.createElement('div');
         box.classList.add('price-group');
 

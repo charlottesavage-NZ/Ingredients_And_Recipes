@@ -194,6 +194,14 @@ input[type="number"] {
     margin-bottom: 15px;
 }
 
+/* "Showing the 10 most recently checked products..." - kept quiet
+   so it reads as a hint, not a price. */
+.price-history-note {
+    font-size: 0.9em;
+    font-style: italic;
+    opacity: 0.8;
+}
+
 /* One box per product, with a divider between them - the same
    look as the recipe cards. */
 .price-group {
