@@ -198,6 +198,17 @@ input[type="number"] {
     padding-left: 20px;
 }
 
+/* The "Missing (X items)" line is clickable to show/hide the list
+   underneath it. The pointer cursor makes it obvious it can be
+   clicked, and the small gap separates it from the opened list. */
+.missing-details summary {
+    cursor: pointer;
+}
+
+.missing-details[open] summary {
+    margin-bottom: 6px;
+}
+
 /* Recipe instructions, shown as numbered steps (see
    renderInstructions() in recipes.js). Extra line spacing and a
    gap between steps stop it reading as one solid block of text. */

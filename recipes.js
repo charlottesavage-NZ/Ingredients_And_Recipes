@@ -66,6 +66,21 @@ let currentNameFilter = '';
 const WEIGHT_UNITS_TO_GRAMS = { g: 1, kg: 1000 };
 const VOLUME_UNITS_TO_ML = { ml: 1, l: 1000 };
 
+// -------------------------------------------------------------
+// "Spoon" measures. Nobody keeps track of how many tablespoons of
+// oyster sauce are left in the bottle - the pantry just says you
+// have a bottle. So for anything a recipe measures in teaspoons or
+// tablespoons, we only check that you have SOME of it in the house
+// (in any unit), rather than trying to compare amounts. These are
+// also the amounts that should never be deducted automatically
+// once "I made this" exists - see isSpoonMeasure() below.
+// -------------------------------------------------------------
+const SPOON_UNITS = ['tsp', 'tbsp'];
+
+function isSpoonMeasure(unit) {
+    return SPOON_UNITS.includes(unit);
+}
+
 function toBaseUnit(quantity, unit) {
     if (unit in WEIGHT_UNITS_TO_GRAMS) {
         return { quantity: quantity * WEIGHT_UNITS_TO_GRAMS[unit], unit: 'g' };
@@ -159,6 +174,20 @@ function checkRecipeAvailability(recipe, inventory, aliases) {
         // only have it in grams), we can't compare them fairly, so
         // it's treated the same as having zero.
         const neededCanonicalKey = neededCanonicalName.toLowerCase();
+
+        // Teaspoons/tablespoons: all that matters is whether you have
+        // ANY of it, in any unit (e.g. a 500ml bottle covers "2 tbsp").
+        // Only counts as missing if there's none in the house at all.
+        if (isSpoonMeasure(ing.unit)) {
+            const haveSome = inventory.some(item =>
+                item.canonicalKey === neededCanonicalKey && Number(item.quantity) > 0
+            );
+            if (!haveSome) {
+                missing.push(`${ing.ingredient_name} (none in the house)`);
+            }
+            return;
+        }
+
         const match = inventory.find(item => {
             // canonicalKey is worked out once per pantry item when the
             // data loads (see loadEverything), not once per check.
@@ -630,11 +659,17 @@ function renderRecipes(recipes) {
 
         // Show a clear yes/no plus, if missing anything, a list of
         // exactly what and how much more is needed.
+        // The missing list starts folded away (a <details> box) to keep
+        // the page tidy - click "Missing (X items)" to open it up.
+        const missingCount = availability.missing.length;
         const availabilityHTML = availability.canMake
             ? `<p class="can-make">✅ You can make this!</p>`
-            : `<p class="cannot-make">❌ Missing:</p><ul class="missing-list">${
-                  availability.missing.map(m => `<li>${escapeHtml(m)}</li>`).join('')
-              }</ul>`;
+            : `<details class="missing-details">
+                   <summary class="cannot-make">❌ Missing (${missingCount} item${missingCount === 1 ? '' : 's'})</summary>
+                   <ul class="missing-list">${
+                       availability.missing.map(m => `<li>${escapeHtml(m)}</li>`).join('')
+                   }</ul>
+               </details>`;
 
         // data-id stores the recipe's id directly on each button, so
         // when clicked we know exactly which recipe it refers to.
