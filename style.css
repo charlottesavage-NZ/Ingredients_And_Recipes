@@ -11,12 +11,18 @@
     --purple-dark: #6754e0;     /* button hover */
     --purple-light: #b4a9ff;    /* outlined buttons and the outline on the box you're typing in */
     --purple-soft: rgba(180, 169, 255, 0.14); /* faint purple tint for hovers */
-    --text: #f1eefc;            /* main text - a soft off-white, not pure white */
-    --text-muted: #bdb5e3;      /* secondary/hint text - a muted lavender */
-    --border: rgba(255, 255, 255, 0.12); /* lines between rows, input borders */
-    --card: rgba(34, 22, 72, 0.78);      /* the deep purple boxes everything sits in (slightly see-through) */
-    --card-solid: #261a52;      /* same colour, fully solid - for the pop-up box */
-    --input: rgba(12, 6, 32, 0.45);      /* inside of text boxes and dropdowns */
+    /* (Toned down: the background and boxes are now a near-black
+       charcoal with just a hint of purple in it, and the purple is
+       saved for the things you click - buttons, links, the current
+       tab. The old values are kept in the comments on each line, in
+       case we ever want the full purple look back.) */
+    --text: #ece9f2;            /* main text - a soft off-white, not pure white */ /* (was #f1eefc) */
+    --text-muted: #a9a3b8;      /* secondary/hint text - a soft grey-lilac */ /* (was #bdb5e3, a muted lavender) */
+    --border: rgba(255, 255, 255, 0.09); /* lines between rows, input borders */ /* (was 0.12) */
+    --card: #1d1a24;            /* the boxes everything sits in */ /* (was rgba(34, 22, 72, 0.78), deep see-through purple) */
+    --card-solid: #1d1a24;      /* same colour, fully solid - for the pop-up box */ /* (was #261a52) */
+    --input: #15131a;           /* inside of text boxes and dropdowns */ /* (was rgba(12, 6, 32, 0.45)) */
+    --page: #121016;            /* the page background behind the boxes */
     --warning: #fbbf5a;         /* "not enough" / "couldn't reach" warnings */
     --danger: #ff8a80;          /* delete / clear-everything buttons */
     --success: #7ee2a8;         /* "You can make this!" */
@@ -46,7 +52,11 @@ body {
     /* (Starts with the original lighter purple at the top, then
        deepens into a dark purple further down, so it's gentler on
        the eyes the further you scroll.) */
-    background: linear-gradient(170deg, #667eea 0%, #764ba2 38%, #3a1f6e 72%, #22123f 100%);
+    /* (Now an almost-black background with the faintest purple glow
+       at the very top, instead of the bright blue-to-purple gradient.
+       The old gradient was:
+       linear-gradient(170deg, #667eea 0%, #764ba2 38%, #3a1f6e 72%, #22123f 100%)) */
+    background: radial-gradient(ellipse at top, rgba(122, 105, 238, 0.14) 0%, transparent 55%), var(--page);
     background-attachment: fixed;
 
     min-height: 100vh; /* ensures the gradient fills the screen */
@@ -116,6 +126,13 @@ body {
     border-color: transparent;
 }
 
+/* (Now the purple button colour instead of the near-white block, to
+   match the darker background.) */
+.main-nav a[aria-current="page"] {
+    background: var(--purple);
+    color: white;
+}
+
 /* On a phone, the big page title (e.g. "Price Checker") was too
    wide and got cut off at the edge - shrink it a bit and tighten
    the spacing so it fits. Big screens are unaffected. */
@@ -163,7 +180,7 @@ main {
     -webkit-backdrop-filter: blur(12px);   /* Safari support */
     border-radius: var(--radius);               /* rounded corners */
     padding: 22px;                              /* internal spacing */
-    border: 1px solid rgba(255, 255, 255, 0.16); /* subtle border to define the box */
+    border: 1px solid var(--border); /* subtle border to define the box */ /* (was rgba(255, 255, 255, 0.16)) */
 }
 
 @media (max-width: 480px) {
@@ -1225,4 +1242,18 @@ ul.graph-legend {
     height: 3px;
     margin-right: 6px;
     vertical-align: middle;
+}
+
+/* ===================== FOOTER ===================== */
+
+/* "Made by Charlotte Savage" along the bottom of every page. */
+.site-footer {
+    margin: 28px 0 8px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.site-footer a {
+    color: var(--purple-light);
 }
