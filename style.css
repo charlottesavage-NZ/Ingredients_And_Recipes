@@ -302,6 +302,14 @@ textarea {
     font-size: 15px;
 }
 
+/* The "Choose File" upload box on the Recipes page uses the same
+   font as everything else (browsers give it their own by default). */
+input[type="file"] {
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text-muted);
+}
+
 /* A purple glow around whichever box you're typing in, so it's
    obvious where you are. */
 input:focus,
