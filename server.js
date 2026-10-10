@@ -601,46 +601,43 @@ function readRecipes(callback) {
 // the house. Items with the same name+unit across different
 // sections get added together.
 // -------------------------------------------------------------
+// UPDATE: it now reads the files with readEachSection() (further
+// down) instead of its own copy of the same file-reading code, then
+// combines them with mergeSections() just below.
 function readAllInventory(callback) {
-    const sections = Object.keys(csvFiles);
-    let combined = [];
-    let completed = 0;
-    let hadError = false;
-
-    sections.forEach(section => {
-        fs.readFile(csvFiles[section], 'utf8', (err, data) => {
-            if (hadError) return;
-            if (err) {
-                hadError = true;
-                return callback(err, null);
-            }
-
-            combined = combined.concat(parseCSV(data));
-            completed++;
-
-            // Only combine everything once ALL four files have
-            // finished reading (they're async, so this stops us
-            // returning early with only some sections loaded).
-            if (completed === sections.length) {
-                const merged = {};
-
-                combined.forEach(item => {
-                    const key = item.name.toLowerCase() + '|' + item.unit;
-                    if (!merged[key]) {
-                        merged[key] = { name: item.name, unit: item.unit, quantity: 0 };
-                    }
-                    merged[key].quantity += Number(item.quantity);
-                    // Whether it's a "have it" item / marked running low
-                    // (see HAVE IT ITEMS) - true if ANY of the merged
-                    // ones are.
-                    merged[key].haveIt = merged[key].haveIt || isHaveIt(item);
-                    merged[key].low = merged[key].low || item.low === 'yes';
-                });
-
-                callback(null, Object.values(merged));
-            }
-        });
+    // Only combine everything once ALL four files have
+    // finished reading (they're async, so this stops us
+    // returning early with only some sections loaded).
+    // (readEachSection() now takes care of that - it waits for all
+    // four files before calling back.)
+    readEachSection((err, itemsBySection) => {
+        if (err) return callback(err, null);
+        callback(null, mergeSections(itemsBySection));
     });
+}
+
+// Combines the four storage areas' lists (from readEachSection) into
+// one, adding together items with the same name+unit. Used by
+// readAllInventory() above, and by the shopping list, which needs
+// BOTH the separate lists and the combined one - so it reads the
+// files once and uses this, instead of reading them twice.
+function mergeSections(itemsBySection) {
+    const merged = {};
+
+    Object.values(itemsBySection).flat().forEach(item => {
+        const key = item.name.toLowerCase() + '|' + item.unit;
+        if (!merged[key]) {
+            merged[key] = { name: item.name, unit: item.unit, quantity: 0 };
+        }
+        merged[key].quantity += Number(item.quantity);
+        // Whether it's a "have it" item / marked running low
+        // (see HAVE IT ITEMS) - true if ANY of the merged
+        // ones are.
+        merged[key].haveIt = merged[key].haveIt || isHaveIt(item);
+        merged[key].low = merged[key].low || item.low === 'yes';
+    });
+
+    return Object.values(merged);
 }
 
 // -------------------------------------------------------------
@@ -724,12 +721,20 @@ function roundTo2(number) {
 // any name. Lets "Beef Mince" in a recipe match "Mince" in the
 // fridge - same idea as resolveIngredientName() in recipes.js.
 // -------------------------------------------------------------
+//
+// UPDATE: the lookup table is remembered for each alias list, so it's
+// only built once until the list changes (see readAllAliases).
+const aliasLookupCache = new WeakMap();
+
 function buildAliasLookup(aliases) {
+    if (aliasLookupCache.has(aliases)) return aliasLookupCache.get(aliases);
+
     const lookup = new Map();
     aliases.forEach(a => {
         const key = normalizeIngredientName(a.alias);
         if (!lookup.has(key)) lookup.set(key, a.canonical_name);
     });
+    aliasLookupCache.set(aliases, lookup);
     return lookup;
 }
 
@@ -738,7 +743,18 @@ function buildAliasLookup(aliases) {
 // added that second one yourself). Stops after 10 steps, or if it
 // ever loops back to a name it's already seen, so a mistake in the
 // alias list can never freeze the server.
+//
+// UPDATE: the same names get looked up over and over (every item in
+// the house, for every ingredient of every recipe...), so each answer
+// is remembered, per lookup table. A new alias list means a new
+// table, so old answers are never used by mistake.
+const canonicalKeyCache = new WeakMap();
+
 function canonicalKey(name, aliasLookup) {
+    if (!canonicalKeyCache.has(aliasLookup)) canonicalKeyCache.set(aliasLookup, new Map());
+    const remembered = canonicalKeyCache.get(aliasLookup);
+    if (remembered.has(name)) return remembered.get(name);
+
     let key = normalizeIngredientName(name);
     const seen = new Set();
 
@@ -746,6 +762,7 @@ function canonicalKey(name, aliasLookup) {
         seen.add(key);
         key = normalizeIngredientName(aliasLookup.get(key));
     }
+    remembered.set(name, key);
     return key;
 }
 
@@ -1422,14 +1439,10 @@ function searchOneStore(searchTerm, storeName) {
 // Reads prices.csv. If the file doesn't exist yet (nobody has
 // saved a price yet), that's not an error - it just means an
 // empty history so far.
+// (UPDATE: now just uses readOptionalCsv() - see LOW STOCK - which
+// does exactly this for any file.)
 function readPrices(callback) {
-    fs.readFile(PRICES_FILE, 'utf8', (err, data) => {
-        if (err) {
-            if (err.code === 'ENOENT') return callback(null, []);
-            return callback(err, null);
-        }
-        callback(null, parseCSV(data));
-    });
+    readOptionalCsv(PRICES_FILE, callback);
 }
 
 // Saves the FULL price history array back to prices.csv.
@@ -1439,14 +1452,9 @@ function savePrices(prices, callback) {
 
 // Reads ingredient_aliases.csv. If it doesn't exist yet (no
 // aliases added so far), that's not an error - just no aliases.
+// (UPDATE: now just uses readOptionalCsv(), same as readPrices.)
 function readAliases(callback) {
-    fs.readFile(ALIASES_FILE, 'utf8', (err, data) => {
-        if (err) {
-            if (err.code === 'ENOENT') return callback(null, []);
-            return callback(err, null);
-        }
-        callback(null, parseCSV(data));
-    });
+    readOptionalCsv(ALIASES_FILE, callback);
 }
 
 // -------------------------------------------------------------
@@ -1456,12 +1464,32 @@ function readAliases(callback) {
 // Only used for reading - saving a new alias still only ever writes
 // your own ones to the CSV, never the built-in list.
 // -------------------------------------------------------------
-function readAllAliases(callback) {
-    readAliases((err, aliases) => {
-        if (err) return callback(err, null);
+//
+// UPDATE: this is used by almost every request (opening the Inventory
+// page alone asks four times), so instead of re-reading your file and
+// rebuilding the ~500 built-in aliases every time:
+// - the built-in list is made ONCE, when the server starts
+// - the combined list is kept, and only rebuilt when your
+//   ingredient_aliases.csv has actually changed since last time
+//   (checked by the file's "last modified" time - so even editing
+//   the file by hand on the garage is picked up straight away)
+// Nothing that uses the list changes it, so it's safe to share.
+const BUILT_IN_ALIAS_LIST = Object.entries(BUILT_IN_ALIASES).map(([alias, canonical_name]) => ({ alias, canonical_name }));
+let aliasListCache = { modified: null, list: null };
 
-        const builtIn = Object.entries(BUILT_IN_ALIASES).map(([alias, canonical_name]) => ({ alias, canonical_name }));
-        callback(null, aliases.concat(builtIn));
+function readAllAliases(callback) {
+    fs.stat(ALIASES_FILE, (statErr, stats) => {
+        // No file yet (no aliases of your own) counts as "modified: 0".
+        const modified = statErr ? 0 : stats.mtimeMs;
+        if (aliasListCache.list && aliasListCache.modified === modified) {
+            return callback(null, aliasListCache.list);
+        }
+
+        readAliases((err, aliases) => {
+            if (err) return callback(err, null);
+            aliasListCache = { modified, list: aliases.concat(BUILT_IN_ALIAS_LIST) };
+            callback(null, aliasListCache.list);
+        });
     });
 }
 
@@ -2957,39 +2985,39 @@ const server = http.createServer((req, res) => {
                 if (err) return sendText(res, 500, 'Could not read recipes');
                 readAllAliases((err, aliases) => {
                     if (err) return sendText(res, 500, 'Could not read ingredient aliases');
-                    readAllInventory((err, inventory) => {
+                    // Each storage area separately (to work out where each
+                    // thing usually goes - see guessStorageLocation() above),
+                    // AND all of them combined. (UPDATE: read once, then
+                    // combined with mergeSections(), instead of reading
+                    // all four files twice.)
+                    readEachSection((err, itemsBySection) => {
                         if (err) return sendText(res, 500, 'Could not read inventory');
-                        // Each storage area separately as well, to work out
-                        // where each thing usually goes - see
-                        // guessStorageLocation() above.
-                        readEachSection((err, itemsBySection) => {
-                            if (err) return sendText(res, 500, 'Could not read inventory');
-                            const aliasLookup = buildAliasLookup(aliases);
-                            const list = buildShoppingList(plan, recipes, inventory, aliasLookup)
-                                .map(item => ({ ...item, location: guessStorageLocation(item.name, itemsBySection, aliasLookup) }));
+                        const inventory = mergeSections(itemsBySection);
+                        const aliasLookup = buildAliasLookup(aliases);
+                        const list = buildShoppingList(plan, recipes, inventory, aliasLookup)
+                            .map(item => ({ ...item, location: guessStorageLocation(item.name, itemsBySection, aliasLookup) }));
 
-                            // Anything marked as running low (the L button)
-                            // goes on the list too, under "top up" - even if
-                            // no recipe this week needs it. Its starting
-                            // amount is one more of the same size it was
-                            // logged as (e.g. another 570 g bottle).
-                            Object.keys(csvFiles).forEach(section => {
-                                itemsBySection[section].filter(stock => stock.low === 'yes').forEach(stock => {
-                                    const key = canonicalKey(stock.name, aliasLookup);
-                                    const already = list.find(entry => canonicalKey(entry.name, aliasLookup) === key && entry.toBuy > 0);
-                                    if (already) {
-                                        already.runningLow = true;
-                                        return;
-                                    }
-                                    list.push({
-                                        name: stock.name, unit: stock.unit, needed: 0, have: 0, toBuy: 1,
-                                        recipes: [], location: section, runningLow: true,
-                                        topUpQuantity: Number(stock.quantity) || 1
-                                    });
+                        // Anything marked as running low (the L button)
+                        // goes on the list too, under "top up" - even if
+                        // no recipe this week needs it. Its starting
+                        // amount is one more of the same size it was
+                        // logged as (e.g. another 570 g bottle).
+                        Object.keys(csvFiles).forEach(section => {
+                            itemsBySection[section].filter(stock => stock.low === 'yes').forEach(stock => {
+                                const key = canonicalKey(stock.name, aliasLookup);
+                                const already = list.find(entry => canonicalKey(entry.name, aliasLookup) === key && entry.toBuy > 0);
+                                if (already) {
+                                    already.runningLow = true;
+                                    return;
+                                }
+                                list.push({
+                                    name: stock.name, unit: stock.unit, needed: 0, have: 0, toBuy: 1,
+                                    recipes: [], location: section, runningLow: true,
+                                    topUpQuantity: Number(stock.quantity) || 1
                                 });
                             });
-                            sendJson(res, list);
                         });
+                        sendJson(res, list);
                     });
                 });
             });
