@@ -112,6 +112,16 @@ const DEFAULT_PAKNSAVE_STORE = "PAK'nSAVE Moorhouse";
 const TRENTS_STORE_NAME = 'Trents Wholesale';
 
 // -------------------------------------------------------------
+// "OUR 3 STORES" - the stores you actually shop at. Picking
+// MAIN_STORES_OPTION in the store dropdown searches all of these at
+// once and shows the results together. To change which stores are
+// in it, edit MAIN_STORES (the names must match the store lists
+// above exactly) - and update the label in MAIN_STORES_OPTION too.
+// -------------------------------------------------------------
+const MAIN_STORES = [TRENTS_STORE_NAME, 'Woolworths Ferrymead', "PAK'nSAVE Wainoni"];
+const MAIN_STORES_OPTION = "Our 3 stores (Trents, Woolworths Ferrymead, PAK'nSAVE Wainoni)";
+
+// -------------------------------------------------------------
 // SUPERMARKET HOME BRANDS - when a price is SAVED (not in the live
 // search results), the supermarkets' own budget brands are renamed
 // to one shared name, so the same product lines up across stores in
@@ -1326,6 +1336,25 @@ async function searchTrents(searchTerm) {
 }
 
 
+// -------------------------------------------------------------
+// Runs a price search at ONE store, using whichever retailer's
+// scraper that store belongs to. Used for normal single-store
+// searches, and once per store for "Our 3 stores".
+// -------------------------------------------------------------
+function searchOneStore(searchTerm, storeName) {
+    // The dropdown is one combined list, but each store name
+    // still tells us which retailer's scraper to actually run.
+    const isPakNSaveStore = Object.prototype.hasOwnProperty.call(PAKNSAVE_STORES, storeName);
+    const isTrentsStore = storeName === TRENTS_STORE_NAME;
+
+    if (isTrentsStore) {
+        return searchTrents(searchTerm);
+    } else if (isPakNSaveStore) {
+        return searchPakNSave(searchTerm, storeName);
+    }
+    return searchWoolworths(searchTerm, storeName);
+}
+
 // Reads prices.csv. If the file doesn't exist yet (nobody has
 // saved a price yet), that's not an error - it just means an
 // empty history so far.
@@ -1433,6 +1462,9 @@ const server = http.createServer((req, res) => {
     // ---- completely separately behind the scenes. ----
     if (parsedUrl.pathname === '/stores' && req.method === 'GET') {
         const allStoreNames = [
+            // "Our 3 stores" goes FIRST, so it's what's picked by
+            // default when the page opens - see MAIN_STORES.
+            MAIN_STORES_OPTION,
             ...Object.keys(WOOLWORTHS_STORES),
             ...Object.keys(PAKNSAVE_STORES),
             TRENTS_STORE_NAME
@@ -1454,21 +1486,31 @@ const server = http.createServer((req, res) => {
             return;
         }
 
-        // The dropdown is one combined list, but each store name
-        // still tells us which retailer's scraper to actually run.
-        const isPakNSaveStore = Object.prototype.hasOwnProperty.call(PAKNSAVE_STORES, storeName);
-        const isTrentsStore = storeName === TRENTS_STORE_NAME;
-
-        let searchPromise;
-        if (isTrentsStore) {
-            searchPromise = searchTrents(searchTerm);
-        } else if (isPakNSaveStore) {
-            searchPromise = searchPakNSave(searchTerm, storeName);
-        } else {
-            searchPromise = searchWoolworths(searchTerm, storeName);
+        // "Our 3 stores" picked in the dropdown - search ALL of them at
+        // the same time and send back one combined list. If one store
+        // fails (slow, changed site...), the other two still come back,
+        // and failedStores tells the page which one didn't.
+        // Single-store searches below are unchanged - they still reply
+        // with a plain list, so nothing else needs to know about this.
+        if (storeName === MAIN_STORES_OPTION) {
+            Promise.allSettled(MAIN_STORES.map(store => searchOneStore(searchTerm, store)))
+                .then(outcomes => {
+                    const results = [];
+                    const failedStores = [];
+                    outcomes.forEach((outcome, index) => {
+                        if (outcome.status === 'fulfilled') {
+                            results.push(...outcome.value);
+                        } else {
+                            console.error(`Price search failed for ${MAIN_STORES[index]}:`, outcome.reason);
+                            failedStores.push(MAIN_STORES[index]);
+                        }
+                    });
+                    sendJson(res, { combined: true, results, failedStores });
+                });
+            return;
         }
 
-        searchPromise
+        searchOneStore(searchTerm, storeName)
             .then(results => sendJson(res, results))
             .catch(err => {
                 console.error('Price search failed:', err);

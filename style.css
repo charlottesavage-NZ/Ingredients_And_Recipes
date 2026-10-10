@@ -236,6 +236,13 @@ input[type="number"] {
     }
 }
 
+/* "Couldn't get results from ... this time" above the search
+   results when one of "Our 3 stores" didn't come back. */
+.price-search-warning {
+    margin-top: 12px;
+    color: #ffe08a;
+}
+
 /* ===================== SAVED PRICE HISTORY ===================== */
 
 /* The "Search saved prices" box stretches across the section. */

@@ -73,6 +73,12 @@ const sortSelect = document.getElementById('price-sort');
 // sent them - see sortResults() below.
 let lastSearchResults = [];
 
+// Whether the most recent search was "Our 3 stores" (which adds a
+// Store column to the results), and any of those stores that didn't
+// come back with results this time.
+let lastSearchWasCombined = false;
+let lastFailedStores = [];
+
 // -------------------------------------------------------------
 // Works out a unit price that can be FAIRLY compared between
 // products, because the stores don't all use the same measure -
@@ -152,14 +158,24 @@ searchBtn.addEventListener('click', function() {
     // The real search can take several seconds (a whole browser has
     // to open on the server and load a real page) - show something
     // so it's clear it's working, not stuck.
-    resultsContainer.innerHTML = `<p>Searching ${storeName}...</p>`;
+    resultsContainer.innerHTML = storeName.startsWith('Our 3 stores')
+        ? `<p>Searching all 3 stores at once - this can take a little longer...</p>`
+        : `<p>Searching ${storeName}...</p>`;
 
     fetch(`${SERVER_URL}/price-search?item=${encodeURIComponent(searchTerm)}&store=${encodeURIComponent(storeName)}`)
         .then(response => {
             if (!response.ok) throw new Error('Search failed');
             return response.json();
         })
-        .then(results => {
+        .then(data => {
+            // "Our 3 stores" sends back { combined, results, failedStores }
+            // instead of a plain list - see the /price-search route in
+            // server.js. The Store column only shows for those searches.
+            const isCombined = !Array.isArray(data) && data.combined;
+            const results = isCombined ? data.results : data;
+            lastSearchWasCombined = isCombined;
+            lastFailedStores = isCombined ? data.failedStores : [];
+
             // Kept so the "Sort by" dropdown can re-order them later
             // without searching all over again.
             lastSearchResults = results;
@@ -178,8 +194,20 @@ searchBtn.addEventListener('click', function() {
 function renderResults(results) {
     resultsContainer.innerHTML = "";
 
+    // For "Our 3 stores": if any store didn't come back (slow, or
+    // their site changed), say so above the results rather than
+    // silently showing fewer stores than expected.
+    if (lastSearchWasCombined && lastFailedStores.length > 0) {
+        const warning = document.createElement('p');
+        warning.classList.add('price-search-warning');
+        warning.textContent = `Couldn't get results from ${lastFailedStores.join(' or ')} this time - try that store on its own in a moment.`;
+        resultsContainer.appendChild(warning);
+    }
+
     if (results.length === 0) {
-        resultsContainer.innerHTML = "<p>No matches found.</p>";
+        const noMatches = document.createElement('p');
+        noMatches.textContent = "No matches found.";
+        resultsContainer.appendChild(noMatches);
         return;
     }
 
@@ -192,9 +220,13 @@ function renderResults(results) {
     // 10g instead) - this shows exactly what they calculated rather
     // than mislabelling it.
     const thead = document.createElement('thead');
+    //
+    // The Store column is only added for "Our 3 stores" searches -
+    // a single-store search already says which store it is.
     thead.innerHTML = `
         <tr>
             <th>Item</th>
+            ${lastSearchWasCombined ? '<th>Store</th>' : ''}
             <th>Size</th>
             <th>Price</th>
             <th>Unit Price</th>
@@ -250,6 +282,14 @@ function renderResults(results) {
         saveCell.appendChild(saveBtn);
 
         row.appendChild(nameCell);
+
+        // Which store this result came from - "Our 3 stores" only.
+        if (lastSearchWasCombined) {
+            const storeCell = document.createElement('td');
+            storeCell.textContent = result.store;
+            row.appendChild(storeCell);
+        }
+
         row.appendChild(sizeCell);
         row.appendChild(priceCell);
         row.appendChild(unitPriceCell);
