@@ -403,6 +403,16 @@ const FILLER_WORDS = new Set([
 // are different products.
 const HEALTHIER_VERSION_PHRASES = /\b(no added (salt|sugar)|reduced (salt|sugar|fat)|less (added )?(salt|sugar)|\d+% less (added )?(salt|sugar))\b/g;
 
+// Different wordings that mean the SAME thing, swapped to one shared
+// wording before comparing. Added after Woolworths' "Corn Sweet
+// Kernels" didn't match Pak'nSave's "Whole Kernel Corn" - both are
+// just a tin of corn kernels. Each pair is [what to look for, what to
+// swap it to].
+const SAME_MEANING_PHRASES = [
+    [/\b(whole|sweet) kernels?\b/g, 'kernel'],   // "Whole Kernel" / "Sweet Kernels" -> "kernel"
+    [/\bsweet ?corn\b/g, 'corn']                 // "Sweetcorn" / "Sweet Corn" -> "corn"
+];
+
 // "Chips" -> "chip", "Tomatoes" -> "tomato", "Berries" -> "berry"
 function singularWord(word) {
     if (word.length <= 3) return word;
@@ -419,10 +429,16 @@ function describeProductName(name) {
     const isHomeBrand = lower.startsWith('home brand');
     const rest = isHomeBrand ? lower.slice('home brand'.length) : lower;
 
-    const words = rest
+    let cleaned = rest
         .replace(/['’]/g, '')          // "Wattie's" -> "watties"
         .replace(/[^a-z0-9%]+/g, ' ')       // "&", "-", "," etc. become spaces
-        .replace(HEALTHIER_VERSION_PHRASES, ' ')   // "no added salt" etc. - see above
+        .replace(HEALTHIER_VERSION_PHRASES, ' ');  // "no added salt" etc. - see above
+    // "Sweet Kernels" -> "kernel" etc. - see SAME_MEANING_PHRASES above
+    SAME_MEANING_PHRASES.forEach(([pattern, replacement]) => {
+        cleaned = cleaned.replace(pattern, replacement);
+    });
+
+    const words = cleaned
         .trim()
         .split(' ')
         .filter(Boolean);
@@ -441,6 +457,41 @@ function describeProductName(name) {
 // matches: "250mL" = "250ml", "3 x 420g" = "3x420g", "1 L" = "1l".
 function normalizeSize(size) {
     return String(size || '').toLowerCase().replace(/\s+/g, '');
+}
+
+// How far apart two pack sizes can be and still count as the same
+// product - 5%. The stores sell the "same" tin in slightly different
+// sizes (Woolworths' corn is 400g or 420g, Pak'nSave's is 410g), so an
+// exact size match kept them apart. 5% lets 400g/410g/420g join up,
+// but keeps genuinely different packs apart - e.g. Red Bull 250ml vs
+// 355ml, or chips 150g vs 170g. The Unit Price column still shows
+// which one is actually cheaper.
+const SIZE_TOLERANCE = 0.05;
+
+// Turns a tidied size (from normalizeSize) into { count, amount } in
+// grams or ml, e.g. "3x420g" -> { count: 3, amount: 420, kind: 'weight' },
+// "1.5l" -> { count: 1, amount: 1500, kind: 'volume' }. Anything it
+// can't read (e.g. "each") gives null, and then the sizes have to
+// match exactly instead.
+function readSize(sizeKey) {
+    const match = sizeKey.match(/^(?:(\d+)x)?(\d*\.?\d+)(g|kg|ml|l)$/);
+    if (!match) return null;
+    const count = Number(match[1] || 1);
+    let amount = Number(match[2]);
+    if (match[3] === 'kg' || match[3] === 'l') amount *= 1000;
+    const kind = (match[3] === 'g' || match[3] === 'kg') ? 'weight' : 'volume';
+    return { count, amount, kind };
+}
+
+// True if two tidied sizes are close enough to be the same product -
+// see SIZE_TOLERANCE above. Multipacks have to have the same number
+// in the pack (a 6-pack never joins a single).
+function sizesCloseEnough(sizeKeyA, sizeKeyB) {
+    if (sizeKeyA === sizeKeyB) return true;
+    const a = readSize(sizeKeyA);
+    const b = readSize(sizeKeyB);
+    if (!a || !b || a.kind !== b.kind || a.count !== b.count) return false;
+    return Math.abs(a.amount - b.amount) / Math.max(a.amount, b.amount) <= SIZE_TOLERANCE;
 }
 
 // How alike two described names are, from 0 (nothing in common, or
@@ -514,8 +565,13 @@ function renderPriceHistory() {
             let bestKey = null;
             let bestScore = 0;
             groupDescriptions.forEach((other, otherKey) => {
-                if (other.sizeKey !== sizeKey) return;
-                const score = nameSimilarity(description, other.description);
+                // UPDATE: sizes now only need to be CLOSE (within 5%),
+                // not exactly the same - see sizesCloseEnough().
+                if (!sizesCloseEnough(other.sizeKey, sizeKey)) return;
+                let score = nameSimilarity(description, other.description);
+                // A tiny nudge so that, if two boxes match equally
+                // well, the one with the exact same size wins.
+                if (other.sizeKey === sizeKey) score += 0.001;
                 if (score > bestScore) {
                     bestScore = score;
                     bestKey = otherKey;
@@ -556,7 +612,13 @@ function renderPriceHistory() {
     }
 
     groupsToShow.forEach(([groupKey, entries]) => {
-        const itemName = groupTitles.get(groupKey);
+        // Now that close sizes share a box, a box can hold more than
+        // one size - if so, the title lists them all, e.g.
+        // "Home Brand Creamed Style Corn (410g / 400g)".
+        const sizesInBox = [...new Set(entries.map(e => e.package_size).filter(Boolean))];
+        const itemName = sizesInBox.length > 1
+            ? `${groupBaseNames.get(groupKey)} (${sizesInBox.join(' / ')})`
+            : groupTitles.get(groupKey);
         const box = document.createElement('div');
         box.classList.add('price-group');
 
