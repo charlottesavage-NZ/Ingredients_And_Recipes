@@ -379,13 +379,29 @@ function loadPriceHistory() {
 //   vs flavoured chips (0.4) and chicken breast vs thigh (0.33) don't.
 // Only affects how Saved Prices is SHOWN - prices.csv isn't changed.
 // -------------------------------------------------------------
-const SAME_PRODUCT_THRESHOLD = 0.6;
+//
+// UPDATE: raised from 0.6 to 0.65 - "Red Bull" vs "Red Bull Sugar
+// Free" scored exactly 0.6 and got lumped together. Everything that
+// SHOULD join scores 0.75 or more, so 0.65 leaves a safe gap.
+const SAME_PRODUCT_THRESHOLD = 0.65;
 
+// "classic", "instant" and "mix" were added after Pak'nSave's "Maggi
+// Classic Pub Style Gravy" didn't match Woolworths' "Maggi Instant
+// Gravy Mix Pub Style" - marketing words each store uses differently.
 const FILLER_WORDS = new Set([
     'and', 'with', 'in', 'of', 'the', 'a', 'flavour', 'flavoured', 'flavor',
     'style', 'crinkle', 'cut', 'can', 'cans', 'bottle', 'tin', 'pack',
-    'punnet', 'bag', 'tray', 'box', 'jar'
+    'punnet', 'bag', 'tray', 'box', 'jar', 'classic', 'instant', 'mix'
 ]);
+
+// Phrases that mean "a healthier version of the SAME product" rather
+// than a different one - e.g. Pak'nSave's "Whole Kernel Corn No Added
+// Salt" vs plain "Whole Kernel Corn". These are taken out before
+// comparing, so both versions share a box (each row still shows its
+// full name underneath). Deliberately NOT included: "lite"/"light"
+// and "sugar free"/"zero" - Lite Milk or Red Bull Sugar Free really
+// are different products.
+const HEALTHIER_VERSION_PHRASES = /\b(no added (salt|sugar)|reduced (salt|sugar|fat)|less (added )?(salt|sugar)|\d+% less (added )?(salt|sugar))\b/g;
 
 // "Chips" -> "chip", "Tomatoes" -> "tomato", "Berries" -> "berry"
 function singularWord(word) {
@@ -405,7 +421,8 @@ function describeProductName(name) {
 
     const words = rest
         .replace(/['’]/g, '')          // "Wattie's" -> "watties"
-        .replace(/[^a-z0-9]+/g, ' ')        // "&", "-", "," etc. become spaces
+        .replace(/[^a-z0-9%]+/g, ' ')       // "&", "-", "," etc. become spaces
+        .replace(HEALTHIER_VERSION_PHRASES, ' ')   // "no added salt" etc. - see above
         .trim()
         .split(' ')
         .filter(Boolean);
