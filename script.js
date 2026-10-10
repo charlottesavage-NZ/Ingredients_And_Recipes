@@ -116,6 +116,9 @@ function setupInventory(sectionName) {
                     quantity: Number(item.quantity)
                 }));
                 renderItems();
+                // Something might have been marked (or un-marked) as
+                // running low - see renderRunningLow() further down.
+                renderRunningLow();
             })
             .catch(error => {
                 console.error(`Could not load ${sectionName} data from server:`, error);
@@ -181,9 +184,16 @@ function setupInventory(sectionName) {
                 li.textContent += ` (${item.tins} ${item.tins === 1 ? 'tin' : 'tins'})`;
             }
 
+            // "Have it" items (sauces etc.) don't show an amount at all -
+            // it isn't kept up to date, so it'd only be misleading. See
+            // HAVE IT ITEMS in server.js.
+            if (item.haveIt) {
+                li.textContent = `${item.name} — have it`;
+            }
+
             // A small "Low" tag if it's below the minimum you set for
-            // it - see LOW STOCK further down.
-            if (lowStockNames.has(item.name.toLowerCase())) {
+            // it - see LOW STOCK further down - or someone's pressed L.
+            if (lowStockNames.has(item.name.toLowerCase()) || item.low === 'yes') {
                 const lowTag = document.createElement('span');
                 lowTag.classList.add('low-tag');
                 lowTag.textContent = 'Low';
@@ -197,6 +207,21 @@ function setupInventory(sectionName) {
             // single letters so the list doesn't get cluttered. Hovering
             // shows what each one does, and screen readers read out the
             // full "Edit Rice" / "Delete Rice".)
+            // L = mark it as running low (press again to clear it).
+            // It then shows in Running Low at the top, and on the Meal
+            // Planner's shopping list, until more is added.
+            const isMarkedLow = item.low === 'yes';
+            const lowButton = document.createElement('button');
+            lowButton.type = 'button';
+            lowButton.classList.add('item-letter-btn', 'low-item-btn');
+            if (isMarkedLow) lowButton.classList.add('is-low');
+            lowButton.textContent = 'L';
+            lowButton.title = isMarkedLow ? `${item.name} is marked as running low - press to clear` : `Mark ${item.name} as running low`;
+            lowButton.setAttribute('aria-label', `Running low: ${item.name}`);
+            lowButton.setAttribute('aria-pressed', String(isMarkedLow));
+            lowButton.addEventListener('click', () => markRunningLow(item, !isMarkedLow));
+            li.appendChild(lowButton);
+
             const editButton = document.createElement('button');
             editButton.type = 'button';
             editButton.classList.add('item-letter-btn', 'edit-item-btn');
@@ -221,6 +246,25 @@ function setupInventory(sectionName) {
             // Add the <li> to the list in the HTML
             list.appendChild(li);
         });
+    }
+
+    // -------------------------------------------------------------
+    // "L" - marks the item as running low, or clears it again.
+    // -------------------------------------------------------------
+    function markRunningLow(item, low) {
+        fetch(`${SERVER_URL}/${sectionName}/low`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: item.name, unit: item.unit, low })
+        })
+            .then(response => {
+                if (!response.ok) throw new Error('Server said ' + response.status);
+                loadItems();
+            })
+            .catch(error => {
+                console.error(`Could not mark ${item.name} as running low:`, error);
+                alert("Couldn't save that - try again in a moment.");
+            });
     }
 
     // -------------------------------------------------------------
@@ -259,6 +303,15 @@ function setupInventory(sectionName) {
         locationSelect.innerHTML = document.getElementById('item-location').innerHTML;
         locationSelect.value = sectionName;
 
+        // "Have it" tick box - see HAVE IT ITEMS in server.js.
+        const haveItLabel = document.createElement('label');
+        haveItLabel.classList.add('have-it-option');
+        const haveItBox = document.createElement('input');
+        haveItBox.type = 'checkbox';
+        haveItBox.checked = Boolean(item.haveIt);
+        haveItLabel.appendChild(haveItBox);
+        haveItLabel.appendChild(document.createTextNode(' Just track that we have it (sauces etc. - not the amount)'));
+
         const saveButton = document.createElement('button');
         saveButton.type = 'button';
         saveButton.textContent = 'Save';
@@ -286,7 +339,8 @@ function setupInventory(sectionName) {
                     name: newName,
                     quantity: Number(quantityInput.value),
                     unit: unitSelect.value,
-                    location: locationSelect.value
+                    location: locationSelect.value,
+                    track: haveItBox.checked ? 'have' : 'amount'
                 })
             })
                 .then(response => {
@@ -310,6 +364,7 @@ function setupInventory(sectionName) {
         li.appendChild(quantityInput);
         li.appendChild(unitSelect);
         li.appendChild(locationSelect);
+        li.appendChild(haveItLabel);
         li.appendChild(saveButton);
         li.appendChild(cancelButton);
         nameInput.focus();
@@ -388,6 +443,12 @@ function setupInventory(sectionName) {
         // without needing to re-fetch anything from the server.
         refresh() {
             renderItems();
+        },
+
+        // This section's items, plus which section it is - used by the
+        // Running Low list to find anything marked with L.
+        getItems() {
+            return items.map(item => ({ ...item, section: sectionName }));
         }
     };
 }
@@ -553,21 +614,53 @@ function renderStockMinimums(minimums) {
     });
 
     // ---- "Running Low": only the ones below their minimum ----
-    const lowOnes = minimums.filter(m => m.low);
-    lowStockSection.hidden = lowOnes.length === 0;
-    lowStockList.innerHTML = '';
-    lowOnes.forEach(min => {
-        const li = document.createElement('li');
-        li.textContent = `${min.name} — ${describeStockAmount(min.have, min.unit, min.haveTins)} left`
-            + ` (want at least ${describeStockAmount(min.minimum, min.unit, min.minimumTins)})`;
-        lowStockList.appendChild(li);
-    });
+    // (now drawn by renderRunningLow() below, which also adds anything
+    // marked with the L button)
+    lastMinimums = minimums;
+    renderRunningLow();
 
     // Re-draw the four lists so their "Low" tags are up to date.
     pantryInventory.refresh();
     fridgeInventory.refresh();
     freezerInventory.refresh();
     chestInventory.refresh();
+}
+
+// The minimums as last loaded - kept so renderRunningLow() can
+// re-draw the list whenever an L mark changes, without re-fetching.
+let lastMinimums = [];
+
+// Friendly name for each storage area, for the Running Low list.
+const AREA_NAMES = { pantry: 'Pantry', fridge: 'Fridge', freezer: 'Freezer (Inside)', chest: 'Chest Freezer' };
+
+// -------------------------------------------------------------
+// Draws the "Running Low" box: everything below its stock minimum,
+// PLUS everything someone's marked with the L button. The box is
+// hidden when there's nothing in either.
+// -------------------------------------------------------------
+function renderRunningLow() {
+    // (Only ever runs once the page has finished loading - after a
+    // section's items arrive from the server - so the four inventories
+    // set up further down always exist by then.)
+    lowStockList.innerHTML = '';
+
+    lastMinimums.filter(m => m.low).forEach(min => {
+        const li = document.createElement('li');
+        li.textContent = `${min.name} — ${describeStockAmount(min.have, min.unit, min.haveTins)} left`
+            + ` (want at least ${describeStockAmount(min.minimum, min.unit, min.minimumTins)})`;
+        lowStockList.appendChild(li);
+    });
+
+    const markedLow = [pantryInventory, fridgeInventory, freezerInventory, chestInventory]
+        .flatMap(inventory => inventory.getItems())
+        .filter(item => item.low === 'yes');
+    markedLow.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = `${item.name} — marked as running low (${AREA_NAMES[item.section]})`;
+        lowStockList.appendChild(li);
+    });
+
+    lowStockSection.hidden = lowStockList.children.length === 0;
 }
 
 // Fetches the minimums from the server and draws them. Called when

@@ -298,6 +298,12 @@ function checkRecipeAvailability(recipe, inventory, aliases) {
         // it's treated the same as having zero.
         const neededCanonicalKey = neededCanonicalName.toLowerCase();
 
+        // A "have it" item in the house (sauces etc. - see HAVE IT ITEMS
+        // in server.js) always counts as enough, whatever the amount.
+        if (inventory.some(item => item.canonicalKey === neededCanonicalKey && item.haveIt && Number(item.quantity) > 0)) {
+            return;
+        }
+
         // Teaspoons/tablespoons: all that matters is whether you have
         // ANY of it, in any unit (e.g. a 500ml bottle covers "2 tbsp").
         // Only counts as missing if there's none in the house at all.
@@ -1175,8 +1181,12 @@ function openMadeDialog(recipeId, preview) {
     });
 
     // Anything deliberately NOT being taken out, listed underneath.
+    // ("have-it" = a sauce etc. that only tracks whether you have it -
+    // see HAVE IT ITEMS in server.js.)
     const leftAlone = preview.skipped.map(s =>
-        s.reason === 'spoon' ? `${s.ingredient} (tsp/tbsp)` : `${s.ingredient} (less than one whole)`
+        s.reason === 'spoon' ? `${s.ingredient} (tsp/tbsp)`
+            : s.reason === 'have-it' ? `${s.ingredient} (we just track that we have it)`
+            : `${s.ingredient} (less than one whole)`
     );
     madeLeftAlone.textContent = leftAlone.length
         ? 'Not removed - take these out yourself when they run out: ' + leftAlone.join(', ')

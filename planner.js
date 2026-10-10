@@ -161,6 +161,8 @@ function describeAmount(item, quantity) {
 
 // One shopping list line as plain text, e.g. "Chopped tomatoes - 2 tins"
 function shoppingLineText(item) {
+    // Only on the list because someone pressed L on the Inventory page.
+    if (item.topUpQuantity !== undefined) return `${item.name} (running low)`;
     if (item.unit === 'spoon') return `${item.name} (none in the house)`;
     return `${item.name} - ${describeAmount(item, item.toBuy)}`;
 }
@@ -173,7 +175,8 @@ function shoppingLineText(item) {
 function renderShoppingList() {
     shoppingListContainer.innerHTML = '';
 
-    if (plan.length === 0) {
+    // (Running low items - the L button - still show with no recipes planned.)
+    if (plan.length === 0 && shoppingList.length === 0) {
         shoppingListContainer.innerHTML = '<p class="no-matches">Add some recipes to the week to see what to buy.</p>';
         return;
     }
@@ -208,7 +211,7 @@ function renderShoppingList() {
 
             // Which recipes it's for, in small text underneath.
             const forRecipes = document.createElement('small');
-            forRecipes.textContent = `For: ${item.recipes.join(', ')}`
+            forRecipes.textContent = item.recipes.length === 0 ? 'Marked as running low - top up' : `For: ${item.recipes.join(', ')}`
                 + (item.have > 0 && item.unit !== 'spoon' ? ` (have ${describeAmount(item, item.have)}, need ${describeAmount(item, item.needed)})` : '');
 
             // Opens the Price Checker with this item already typed in.
@@ -272,6 +275,9 @@ const addToChoices = new Map();
 // - tsp/tbsp things ("none in the house") as 1 - e.g. one bottle
 // - everything else as however much the list says to buy
 function startingAmount(item) {
+    // Running low items (the L button) start on one more of the same
+    // size it was logged as, e.g. another 570 g bottle of BBQ sauce.
+    if (item.topUpQuantity !== undefined) return { quantity: item.topUpQuantity, unit: item.unit };
     if (item.tinsToBuy !== undefined) return { quantity: item.tinsToBuy, unit: 'tin' };
     if (item.unit === 'spoon') return { quantity: 1, unit: 'each' };
     return { quantity: item.unit === 'each' ? item.toBuy : Math.round(item.toBuy), unit: item.unit };

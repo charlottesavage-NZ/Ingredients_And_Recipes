@@ -402,10 +402,15 @@ function csvField(value) {
 // Turns an array of objects back into CSV text, ready to save
 // to disk. This is the reverse of parseCSV.
 // -------------------------------------------------------------
+// UPDATE: two extra columns on the end (older files without them
+// still read fine - the values just come through blank):
+// - track: "have" = a "have it" item (see HAVE IT ITEMS below),
+//   "amount" = a counted item, blank = decide from its name
+// - low: "yes" if someone's pressed L to mark it as running low
 function stringifyCSV(items) {
-    const header = 'name,quantity,unit';
+    const header = 'name,quantity,unit,track,low';
     const rows = items.map(item =>
-        [item.name, item.quantity, item.unit].map(csvField).join(',')
+        [item.name, item.quantity, item.unit, item.track, item.low].map(csvField).join(',')
     );
     return [header, ...rows].join('\n') + '\n';
 }
@@ -625,6 +630,11 @@ function readAllInventory(callback) {
                         merged[key] = { name: item.name, unit: item.unit, quantity: 0 };
                     }
                     merged[key].quantity += Number(item.quantity);
+                    // Whether it's a "have it" item / marked running low
+                    // (see HAVE IT ITEMS) - true if ANY of the merged
+                    // ones are.
+                    merged[key].haveIt = merged[key].haveIt || isHaveIt(item);
+                    merged[key].low = merged[key].low || item.low === 'yes';
                 });
 
                 callback(null, Object.values(merged));
@@ -812,6 +822,38 @@ function isTinnedGood(name, aliasLookup) {
 // Inventory page shows as "4 kg (10 tins)". Only added to the copy
 // that's SENT - it's never saved into the CSV.
 // -------------------------------------------------------------
+// =============================================================
+// HAVE IT ITEMS - sauces, condiments and so on
+// =============================================================
+// Nobody logs every squirt of BBQ sauce, so for things like that the
+// amount would be wrong within a week. Instead they're "have it"
+// items: the app only cares whether there's SOME in the house.
+// - they show as "BBQ Sauce - have it" instead of an amount
+// - recipes just check they're in the house
+// - "I made this" never takes any out (even if a recipe says 50 ml)
+// - when one's getting low, someone presses L to mark it (see the
+//   POST /pantry/low route), which puts it on the Running Low list
+//   and the shopping list until more is added
+// Everything else is a "counted" item, which works as before.
+//
+// Which kind an item is: whatever's been picked in its Edit box
+// (the "track" column), or if nothing's been picked, a guess from
+// its name using the words below.
+// -------------------------------------------------------------
+const HAVE_IT_WORDS = /\b(sauces?|syrups?|jams?|mayo|mayonnaise|pickles?|glaze|pastes?|oils?|vinegar|spices?|seasoning|yeast|crushed garlic|crushed ginger|ketchup|mustard|relish|chutney|dressing|honey|marmite|vegemite|peanut butter|sriracha|yoghurt|yogurt)\b/i;
+
+function isHaveIt(item) {
+    if (item.track === 'have') return true;
+    if (item.track === 'amount') return false;
+    return HAVE_IT_WORDS.test(item.name);
+}
+
+// Adds haveIt: true/false to each item, for the Inventory page to
+// show "have it" instead of an amount.
+function addTrackingInfo(items) {
+    return items.map(item => ({ ...item, haveIt: isHaveIt(item) }));
+}
+
 function addTinCounts(items, aliasLookup) {
     return items.map(item => {
         if (!isTinnedGood(item.name, aliasLookup)) return item;
@@ -876,6 +918,16 @@ function planRecipeDeduction(recipe, itemsBySection, aliasLookup) {
 
         if (SPOON_UNITS.includes(unit)) {
             skipped.push({ ingredient: ing.ingredient_name, reason: 'spoon' });
+            return;
+        }
+
+        // "Have it" items (sauces etc. - see HAVE IT ITEMS) are never
+        // taken out, whatever the recipe's amount.
+        const ingredientKey = canonicalKey(ing.ingredient_name, aliasLookup);
+        const isHaveItInHouse = DEDUCT_ORDER.some(section =>
+            itemsBySection[section].some(item => isHaveIt(item) && canonicalKey(item.name, aliasLookup) === ingredientKey));
+        if (isHaveItInHouse) {
+            skipped.push({ ingredient: ing.ingredient_name, reason: 'have-it' });
             return;
         }
 
@@ -2152,6 +2204,13 @@ function buildShoppingList(plan, recipes, inventory, aliasLookup) {
             return { name: item.name, unit: 'spoon', needed: 0, have: haveSome ? 1 : 0, toBuy: haveSome ? 0 : 1, recipes: [...item.recipes] };
         }
 
+        // A "have it" item in the house (sauces etc.) always counts as
+        // enough - its amount isn't tracked. (If it's running low, it
+        // gets added to the list separately - see the route.)
+        if (matching.some(stock => stock.haveIt && Number(stock.quantity) > 0)) {
+            return { name: item.name, unit: item.unit, needed: roundTo2(item.quantity), have: roundTo2(item.quantity), toBuy: 0, recipes: [...item.recipes] };
+        }
+
         const have = matching
             .filter(stock => stock.unit === item.unit)
             .reduce((total, stock) => total + Number(stock.quantity), 0);
@@ -2908,6 +2967,27 @@ const server = http.createServer((req, res) => {
                             const aliasLookup = buildAliasLookup(aliases);
                             const list = buildShoppingList(plan, recipes, inventory, aliasLookup)
                                 .map(item => ({ ...item, location: guessStorageLocation(item.name, itemsBySection, aliasLookup) }));
+
+                            // Anything marked as running low (the L button)
+                            // goes on the list too, under "top up" - even if
+                            // no recipe this week needs it. Its starting
+                            // amount is one more of the same size it was
+                            // logged as (e.g. another 570 g bottle).
+                            Object.keys(csvFiles).forEach(section => {
+                                itemsBySection[section].filter(stock => stock.low === 'yes').forEach(stock => {
+                                    const key = canonicalKey(stock.name, aliasLookup);
+                                    const already = list.find(entry => canonicalKey(entry.name, aliasLookup) === key && entry.toBuy > 0);
+                                    if (already) {
+                                        already.runningLow = true;
+                                        return;
+                                    }
+                                    list.push({
+                                        name: stock.name, unit: stock.unit, needed: 0, have: 0, toBuy: 1,
+                                        recipes: [], location: section, runningLow: true,
+                                        topUpQuantity: Number(stock.quantity) || 1
+                                    });
+                                });
+                            });
                             sendJson(res, list);
                         });
                     });
@@ -2958,6 +3038,10 @@ const server = http.createServer((req, res) => {
                             } else {
                                 list.push({ name: item.name, quantity: roundTo2(amount.quantity), unit: amount.unit });
                             }
+                            // Just bought more, so it's not running low any more.
+                            list.forEach(stock => {
+                                if (canonicalKey(stock.name, aliasLookup) === key) stock.low = '';
+                            });
                         });
 
                         const saves = changedSections.map(section => new Promise((resolve, reject) => {
@@ -3214,6 +3298,35 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // ---- Mark ONE item as running low (the L button), or clear it ----
+    // e.g. POST /fridge/low with { name: "BBQ Sauce", unit: "g", low: true }
+    // It then shows on the Running Low list and the Meal Planner's
+    // shopping list until more is added (see HAVE IT ITEMS above).
+    const lowMatch = req.url.match(/^\/(\w+)\/low$/);
+    if (lowMatch && csvFiles[lowMatch[1]] && req.method === 'POST') {
+        const lowSection = lowMatch[1];
+
+        readJsonBody(req, res, ({ name, unit, low }) => runOneAtATime(res, () => {
+            readItems(lowSection, (err, items) => {
+                if (err) return sendText(res, 500, 'Could not read ' + csvFiles[lowSection]);
+
+                const item = items.find(i => i.name.toLowerCase() === String(name).toLowerCase() && i.unit === unit);
+                if (!item) return sendText(res, 404, 'Item not found');
+                item.low = low ? 'yes' : '';
+
+                saveItems(lowSection, items, err => {
+                    if (err) return sendText(res, 500, 'Could not save ' + csvFiles[lowSection]);
+                    logActivity(loggedInAs, [{
+                        action: low ? 'Marked running low' : 'Cleared running low',
+                        item: item.name, location: SECTION_NAMES[lowSection]
+                    }]);
+                    sendJson(res, { name: item.name, low: Boolean(low) });
+                });
+            });
+        }));
+        return;
+    }
+
     // ---- Edit ONE item: fix its name, amount or unit, or move it ----
     // ---- to a different storage area ----
     // e.g. POST /fridge/edit with
@@ -3228,9 +3341,11 @@ const server = http.createServer((req, res) => {
     if (editMatch && csvFiles[editMatch[1]] && req.method === 'POST') {
         const editFrom = editMatch[1];
 
-        readJsonBody(req, res, ({ original, name, quantity, unit, location }) => runOneAtATime(res, () => {
+        readJsonBody(req, res, ({ original, name, quantity, unit, location, track }) => runOneAtATime(res, () => {
             name = String(name || '').trim();
             const editTo = csvFiles[location] ? location : editFrom;
+            // The Edit box's "have it" tick box (see HAVE IT ITEMS).
+            const chosenTrack = track === 'have' || track === 'amount' ? track : undefined;
             if (!original || !name) return sendText(res, 400, 'Item name is needed');
 
             readAllAliases((err, aliases) => {
@@ -3261,8 +3376,10 @@ const server = http.createServer((req, res) => {
                             const sameThing = target.find(i => i.name.toLowerCase() === name.toLowerCase() && i.unit === amount.unit);
                             if (sameThing) {
                                 sameThing.quantity = roundTo2(Number(sameThing.quantity) + amount.quantity);
+                                if (chosenTrack) sameThing.track = chosenTrack;
                             } else {
-                                target.push({ name, quantity: roundTo2(amount.quantity), unit: amount.unit });
+                                // (keeps its running low mark, if it had one)
+                                target.push({ name, quantity: roundTo2(amount.quantity), unit: amount.unit, track: chosenTrack || before.track, low: before.low });
                             }
                         }
 
@@ -3334,7 +3451,7 @@ const server = http.createServer((req, res) => {
 
             readAllAliases((err, aliases) => {
                 if (err) return sendText(res, 500, 'Could not read ingredient aliases');
-                sendJson(res, addTinCounts(items, buildAliasLookup(aliases)));
+                sendJson(res, addTrackingInfo(addTinCounts(items, buildAliasLookup(aliases))));
             });
         });
         return;
@@ -3393,6 +3510,9 @@ const server = http.createServer((req, res) => {
                 if (existingItem) {
                     existingItem.quantity = Number(existingItem.quantity) + Number(newItem.quantity);
 
+                    // Added more of it, so it's not running low any more.
+                    if (Number(newItem.quantity) > 0) existingItem.low = '';
+
                     if (existingItem.quantity <= 0) {
                         items = items.filter(i =>
                             !(i.name.toLowerCase() === newItem.name.toLowerCase() && i.unit === newItem.unit)
@@ -3425,7 +3545,7 @@ const server = http.createServer((req, res) => {
                         // in these two headers instead.
                         res.setHeader('X-Undo-Id', undoId);
                         res.setHeader('X-Undo-Description', encodeURIComponent(description));
-                        sendJson(res, addTinCounts(items, aliasLookup));
+                        sendJson(res, addTrackingInfo(addTinCounts(items, aliasLookup)));
                     });
                 });
             });

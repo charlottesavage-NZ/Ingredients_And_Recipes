@@ -1356,3 +1356,34 @@ button.cancel-edit-btn {
 button.cancel-edit-btn:hover {
     background: var(--purple-soft);
 }
+
+/* The "L" (running low) button - a quiet yellow outline, filled in
+   once it's been pressed so you can see it's marked. */
+button.item-letter-btn.low-item-btn {
+    margin-left: 10px;
+    background: transparent;
+    color: var(--warning);
+    border: 1px solid rgba(251, 191, 90, 0.5);
+}
+
+button.item-letter-btn.low-item-btn:hover {
+    background: rgba(251, 191, 90, 0.12);
+}
+
+button.item-letter-btn.low-item-btn.is-low {
+    background: var(--warning);
+    color: #22123f;
+}
+
+/* L now comes first, so E sits right next to it. */
+button.item-letter-btn.low-item-btn + button.item-letter-btn.edit-item-btn {
+    margin-left: 6px;
+}
+
+/* The "Just track that we have it" tick box in the edit form. */
+label.have-it-option {
+    flex-basis: 100%;
+    font-weight: normal;
+    font-size: 13px;
+    color: var(--text-muted);
+}
