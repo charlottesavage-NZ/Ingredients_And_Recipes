@@ -351,6 +351,66 @@ function stringifyGenericCSV(headers, items) {
     return [headerRow, ...rows].join('\n') + '\n';
 }
 
+// -------------------------------------------------------------
+// Saves text to a file SAFELY. Instead of writing straight over
+// the real file (which empties it first, then fills it back in),
+// this writes to a temporary file next to it and then swaps it
+// into place in one step. If the server gets stopped half-way
+// through a save - e.g. by the hourly update restarting it - the
+// real file is left untouched, rather than half-written or empty.
+// -------------------------------------------------------------
+function writeFileSafely(filePath, text, callback) {
+    const tempPath = filePath + '.tmp';
+    fs.writeFile(tempPath, text, 'utf8', (err) => {
+        if (err) return callback(err);
+        fs.rename(tempPath, filePath, callback);
+    });
+}
+
+// -------------------------------------------------------------
+// Makes changes to the CSV files happen ONE AT A TIME. Every save
+// works by reading a whole file, changing it, then writing the
+// whole thing back - so if two saves overlapped (e.g. two people
+// adding pantry items at the same moment), the second one could
+// write back an old copy and quietly wipe out the first person's
+// change. Each change waits its turn here, and the next one starts
+// as soon as the previous one has sent its reply.
+// -------------------------------------------------------------
+let writeQueue = Promise.resolve();
+
+function runOneAtATime(res, task) {
+    writeQueue = writeQueue.then(() => new Promise(resolve => {
+        // 'finish' fires once the reply has been sent, 'close' if the
+        // browser gave up waiting - either way, let the next one go.
+        res.on('finish', resolve);
+        res.on('close', resolve);
+
+        try {
+            task();
+        } catch (err) {
+            // Without this, one unexpected error would leave the
+            // queue stuck forever and no change could ever be saved
+            // again until the server restarted.
+            console.error('Unexpected error while saving:', err);
+            sendText(res, 500, 'Something went wrong while saving');
+        }
+    }));
+}
+
+// -------------------------------------------------------------
+// Small helpers for sending a reply back to the browser, so every
+// route below doesn't have to repeat the same two lines each time.
+// -------------------------------------------------------------
+function sendJson(res, data) {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(data));
+}
+
+function sendText(res, statusCode, message) {
+    res.writeHead(statusCode, { 'Content-Type': 'text/plain' });
+    res.end(message);
+}
+
 // Reads a section's CSV file and hands back the parsed items.
 function readItems(section, callback) {
     fs.readFile(csvFiles[section], 'utf8', (err, data) => {
@@ -361,7 +421,63 @@ function readItems(section, callback) {
 
 // Saves an array of items back to a section's CSV file.
 function saveItems(section, items, callback) {
-    fs.writeFile(csvFiles[section], stringifyCSV(items), 'utf8', callback);
+    writeFileSafely(csvFiles[section], stringifyCSV(items), callback);
+}
+
+// -------------------------------------------------------------
+// The column headers for each of the three recipe files, kept in
+// one place so every route that saves them uses the same order.
+// -------------------------------------------------------------
+const RECIPE_HEADERS = ['id', 'name', 'instructions'];
+const RECIPE_INGREDIENT_HEADERS = ['recipe_id', 'ingredient_name', 'quantity', 'unit'];
+const RECIPE_VOTE_HEADERS = ['recipe_id', 'person', 'vote'];
+
+// -------------------------------------------------------------
+// Reads recipes.csv and recipe_ingredients.csv as two plain lists
+// (WITHOUT joining them together like readRecipes() does), ready
+// to be changed and saved back. Used by add/edit/delete recipe.
+// On a problem it sends the error reply itself, so callers only
+// ever get called back when both files were read successfully.
+// -------------------------------------------------------------
+function readRecipeFilesForEditing(res, callback) {
+    fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
+        if (err) return sendText(res, 500, 'Could not read recipes');
+
+        fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
+            if (err) return sendText(res, 500, 'Could not read recipe ingredients');
+            callback(parseCSV(recipesData), parseCSV(ingredientsData));
+        });
+    });
+}
+
+// -------------------------------------------------------------
+// Saves both recipe files, then replies with replyData. This used
+// to be written out in full three times (add, edit, delete).
+// -------------------------------------------------------------
+function saveRecipeFiles(res, recipes, ingredients, replyData) {
+    writeFileSafely(RECIPES_FILE, stringifyGenericCSV(RECIPE_HEADERS, recipes), (err) => {
+        if (err) return sendText(res, 500, 'Could not save recipes');
+
+        writeFileSafely(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(RECIPE_INGREDIENT_HEADERS, ingredients), (err) => {
+            if (err) return sendText(res, 500, 'Could not save recipe ingredients');
+            sendJson(res, replyData);
+        });
+    });
+}
+
+// -------------------------------------------------------------
+// Groups a list of rows by their recipe_id, e.g. every ingredient
+// row for recipe 123 ends up together under key "123". Lets
+// readRecipes() look up each recipe's ingredients in one step,
+// instead of searching the WHOLE ingredients list once per recipe.
+// -------------------------------------------------------------
+function groupByRecipeId(rows) {
+    const groups = new Map();
+    rows.forEach(row => {
+        if (!groups.has(row.recipe_id)) groups.set(row.recipe_id, []);
+        groups.get(row.recipe_id).push(row);
+    });
+    return groups;
 }
 
 // -------------------------------------------------------------
@@ -369,31 +485,27 @@ function saveItems(section, items, callback) {
 // so each recipe object has its own list of ingredients attached.
 // -------------------------------------------------------------
 function readRecipes(callback) {
-    fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
-        if (err) return callback(err, null);
+    // All three files are read at the SAME time rather than one
+    // after another, since none of them depends on the others.
+    Promise.all([
+        fs.promises.readFile(RECIPES_FILE, 'utf8'),
+        fs.promises.readFile(RECIPE_INGREDIENTS_FILE, 'utf8'),
+        fs.promises.readFile(RECIPE_VOTES_FILE, 'utf8')
+    ]).then(([recipesData, ingredientsData, votesData]) => {
+        const recipes = parseCSV(recipesData);
+        const ingredientsByRecipe = groupByRecipeId(parseCSV(ingredientsData));
+        const votesByRecipe = groupByRecipeId(parseCSV(votesData));
 
-        fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
-            if (err) return callback(err, null);
+        // Attach each recipe's own ingredients AND votes by
+        // matching recipe_id, same pattern as before.
+        const recipesWithExtras = recipes.map(recipe => ({
+            ...recipe,
+            ingredients: ingredientsByRecipe.get(recipe.id) || [],
+            votes: votesByRecipe.get(recipe.id) || []
+        }));
 
-            fs.readFile(RECIPE_VOTES_FILE, 'utf8', (err, votesData) => {
-                if (err) return callback(err, null);
-
-                const recipes = parseCSV(recipesData);
-                const ingredients = parseCSV(ingredientsData);
-                const votes = parseCSV(votesData);
-
-                // Attach each recipe's own ingredients AND votes by
-                // matching recipe_id, same pattern as before.
-                const recipesWithExtras = recipes.map(recipe => ({
-                    ...recipe,
-                    ingredients: ingredients.filter(ing => ing.recipe_id === recipe.id),
-                    votes: votes.filter(v => v.recipe_id === recipe.id)
-                }));
-
-                callback(null, recipesWithExtras);
-            });
-        });
-    });
+        callback(null, recipesWithExtras);
+    }, err => callback(err, null));
 }
 
 // -------------------------------------------------------------
@@ -831,7 +943,7 @@ function readPrices(callback) {
 
 // Saves the FULL price history array back to prices.csv.
 function savePrices(prices, callback) {
-    fs.writeFile(PRICES_FILE, stringifyGenericCSV(PRICE_HEADERS, prices), 'utf8', callback);
+    writeFileSafely(PRICES_FILE, stringifyGenericCSV(PRICE_HEADERS, prices), callback);
 }
 
 // Reads ingredient_aliases.csv. If it doesn't exist yet (no
@@ -848,7 +960,7 @@ function readAliases(callback) {
 
 // Saves the FULL alias list back to ingredient_aliases.csv.
 function saveAliases(aliases, callback) {
-    fs.writeFile(ALIASES_FILE, stringifyGenericCSV(ALIAS_HEADERS, aliases), 'utf8', callback);
+    writeFileSafely(ALIASES_FILE, stringifyGenericCSV(ALIAS_HEADERS, aliases), callback);
 }
 
 // -------------------------------------------------------------
@@ -859,620 +971,418 @@ function saveAliases(aliases, callback) {
 // -------------------------------------------------------------
 function parseJsonBody(body, res) {
     try {
-            return JSON.parse(body);
-        } catch (err) {
-            res.writeHead(400, { 'Content-Type': 'text/plain' });
-            res.end('Invalid JSON in request body');
-            return null;
-        }
+        return JSON.parse(body);
+    } catch (err) {
+        sendText(res, 400, 'Invalid JSON in request body');
+        return null;
+    }
+}
+
+// -------------------------------------------------------------
+// Collects the whole request body (it arrives in chunks), turns it
+// into an object with parseJsonBody() above, then hands it to
+// onData. If the JSON is bad, a 400 reply has already been sent
+// and onData never runs.
+// -------------------------------------------------------------
+function readJsonBody(req, res, onData) {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+        const data = parseJsonBody(body, res);
+        if (data) onData(data);
+    });
+}
+
+const server = http.createServer((req, res) => {
+
+    // Parsed once here so any route below can read query string
+    // values (e.g. ?item=mince) via parsedUrl.searchParams, on top
+    // of the existing plain req.url string matching other routes
+    // already use.
+    const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
+
+    // Let the browser talk to this server from a file:// page.
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // Browsers sometimes send a quick permission check ("OPTIONS")
+    // before the real request - just say "yes, go ahead."
+    if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
     }
 
-    const server = http.createServer((req, res) => {
+    // ---- Combined store list for the dropdown - one list on the ----
+    // ---- page, even though Woolworths and Pak'nSave are handled ----
+    // ---- completely separately behind the scenes. ----
+    if (parsedUrl.pathname === '/stores' && req.method === 'GET') {
+        const allStoreNames = [
+            ...Object.keys(WOOLWORTHS_STORES),
+            ...Object.keys(PAKNSAVE_STORES),
+            TRENTS_STORE_NAME
+        ];
+        sendJson(res, allStoreNames);
+        return;
+    }
 
-        // Parsed once here so any route below can read query string
-        // values (e.g. ?item=mince) via parsedUrl.searchParams, on top
-        // of the existing plain req.url string matching other routes
-        // already use.
-        const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
+    // ---- PRICE CHECKER: live search, routed to whichever ----
+    // ---- retailer the chosen store actually belongs to ----
+    // Has to be checked BEFORE the pantry/fridge/freezer/chest
+    // routing below, same reasoning as the recipes routes.
+    if (parsedUrl.pathname === '/price-search' && req.method === 'GET') {
+        const searchTerm = parsedUrl.searchParams.get('item');
+        const storeName = parsedUrl.searchParams.get('store');
 
-        // Let the browser talk to this server from a file:// page.
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-        // Browsers sometimes send a quick permission check ("OPTIONS")
-        // before the real request - just say "yes, go ahead."
-        if (req.method === 'OPTIONS') {
-            res.writeHead(204);
-            res.end();
+        if (!searchTerm) {
+            sendText(res, 400, 'Missing ?item= search term');
             return;
         }
 
-        // ---- Combined store list for the dropdown - one list on the ----
-        // ---- page, even though Woolworths and Pak'nSave are handled ----
-        // ---- completely separately behind the scenes. ----
-        if (parsedUrl.pathname === '/stores' && req.method === 'GET') {
-            const allStoreNames = [
-                ...Object.keys(WOOLWORTHS_STORES),
-                ...Object.keys(PAKNSAVE_STORES),
-                TRENTS_STORE_NAME
-            ];
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(allStoreNames));
-            return;
+        // The dropdown is one combined list, but each store name
+        // still tells us which retailer's scraper to actually run.
+        const isPakNSaveStore = Object.prototype.hasOwnProperty.call(PAKNSAVE_STORES, storeName);
+        const isTrentsStore = storeName === TRENTS_STORE_NAME;
+
+        let searchPromise;
+        if (isTrentsStore) {
+            searchPromise = searchTrents(searchTerm);
+        } else if (isPakNSaveStore) {
+            searchPromise = searchPakNSave(searchTerm, storeName);
+        } else {
+            searchPromise = searchWoolworths(searchTerm, storeName);
         }
 
-        // ---- PRICE CHECKER: live search, routed to whichever ----
-        // ---- retailer the chosen store actually belongs to ----
-        // Has to be checked BEFORE the pantry/fridge/freezer/chest
-        // routing below, same reasoning as the recipes routes.
-        if (parsedUrl.pathname === '/price-search' && req.method === 'GET') {
-            const searchTerm = parsedUrl.searchParams.get('item');
-            const storeName = parsedUrl.searchParams.get('store');
+        searchPromise
+            .then(results => sendJson(res, results))
+            .catch(err => {
+                console.error('Price search failed:', err);
+                sendText(res, 500, `Could not complete the price search - ${storeName || 'the store'} may be slow to respond, or their site has changed. Try again in a moment.`);
+            });
+        return;
+    }
 
-            if (!searchTerm) {
-                res.writeHead(400, { 'Content-Type': 'text/plain' });
-                res.end('Missing ?item= search term');
-                return;
-            }
+    // ---- Every price ever saved, for the history list on the page ----
+    if (parsedUrl.pathname === '/prices' && req.method === 'GET') {
+        readPrices((err, prices) => {
+            if (err) return sendText(res, 500, 'Could not read price history');
+            sendJson(res, prices);
+        });
+        return;
+    }
 
-            // The dropdown is one combined list, but each store name
-            // still tells us which retailer's scraper to actually run.
-            const isPakNSaveStore = Object.prototype.hasOwnProperty.call(PAKNSAVE_STORES, storeName);
-            const isTrentsStore = storeName === TRENTS_STORE_NAME;
-
-            let searchPromise;
-            if (isTrentsStore) {
-                searchPromise = searchTrents(searchTerm);
-            } else if (isPakNSaveStore) {
-                searchPromise = searchPakNSave(searchTerm, storeName);
-            } else {
-                searchPromise = searchWoolworths(searchTerm, storeName);
-            }
-
-            searchPromise
-                .then(results => {
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify(results));
-                })
-                .catch(err => {
-                    console.error('Price search failed:', err);
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end(`Could not complete the price search - ${storeName || 'the store'} may be slow to respond, or their site has changed. Try again in a moment.`);
-                });
-            return;
-        }
-
-        // ---- Every price ever saved, for the history list on the page ----
-        if (parsedUrl.pathname === '/prices' && req.method === 'GET') {
+    // ---- Save ONE specific search result into the price history ----
+    if (parsedUrl.pathname === '/prices' && req.method === 'POST') {
+        readJsonBody(req, res, newPrice => runOneAtATime(res, () => {
             readPrices((err, prices) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read price history');
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(prices));
-            });
-            return;
-        }
+                if (err) return sendText(res, 500, 'Could not read price history');
 
-        // ---- Save ONE specific search result into the price history ----
-        if (parsedUrl.pathname === '/prices' && req.method === 'POST') {
-            let body = '';
-            req.on('data', chunk => { body += chunk; });
-            req.on('end', () => {
-                const newPrice = parseJsonBody(body, res);
-                if (!newPrice) return;
+                // Every save is a NEW row - we're keeping full
+                // history, not overwriting a previous check of the
+                // same item.
+                const entry = {
+                    id: Date.now().toString(),
+                    item_name: newPrice.item_name,
+                    price: newPrice.price,
+                    cup_price: newPrice.cup_price,
+                    cup_measure: newPrice.cup_measure,
+                    package_size: newPrice.package_size,
+                    store: newPrice.store,
+                    date_checked: new Date().toISOString()
+                };
 
-                readPrices((err, prices) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not read price history');
-                        return;
-                    }
+                prices.push(entry);
 
-                    // Every save is a NEW row - we're keeping full
-                    // history, not overwriting a previous check of the
-                    // same item.
-                    const entry = {
-                        id: Date.now().toString(),
-                        item_name: newPrice.item_name,
-                        price: newPrice.price,
-                        cup_price: newPrice.cup_price,
-                        cup_measure: newPrice.cup_measure,
-                        package_size: newPrice.package_size,
-                        store: newPrice.store,
-                        date_checked: new Date().toISOString()
-                    };
-
-                    prices.push(entry);
-
-                    savePrices(prices, (err) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not save price history');
-                            return;
-                        }
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify(entry));
-                    });
+                savePrices(prices, (err) => {
+                    if (err) return sendText(res, 500, 'Could not save price history');
+                    sendJson(res, entry);
                 });
             });
-            return;
-        }
+        }));
+        return;
+    }
 
-        // ---- RECIPES: separate logic since it's two linked files, not one ----
-        // This has to be checked BEFORE the pantry/fridge/freezer/chest
-        // routing below, since "recipes" isn't in csvFiles and would
-        // otherwise get rejected as an unknown section.
-        if (req.url === '/recipes' && req.method === 'GET') {
-            readRecipes((err, recipes) => {
-                if (err) {
-                    console.error('Error reading recipes:', err);
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read recipes');
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(recipes));
-            });
-            return;
-        }
+    // ---- RECIPES: separate logic since it's two linked files, not one ----
+    // This has to be checked BEFORE the pantry/fridge/freezer/chest
+    // routing below, since "recipes" isn't in csvFiles and would
+    // otherwise get rejected as an unknown section.
+    if (req.url === '/recipes' && req.method === 'GET') {
+        readRecipes((err, recipes) => {
+            if (err) {
+                console.error('Error reading recipes:', err);
+                return sendText(res, 500, 'Could not read recipes');
+            }
+            sendJson(res, recipes);
+        });
+        return;
+    }
 
-        if (req.url === '/recipes' && req.method === 'POST') {
-            let body = '';
-            req.on('data', chunk => { body += chunk; });
-            req.on('end', () => {
-                const newRecipe = parseJsonBody(body, res);
-                if (!newRecipe) return;
+    if (req.url === '/recipes' && req.method === 'POST') {
+        readJsonBody(req, res, newRecipe => runOneAtATime(res, () => {
+            // Generate a simple unique ID using the current timestamp.
+            // This avoids needing to track "the last ID used" ourselves.
+            const newId = Date.now().toString();
 
-                // Generate a simple unique ID using the current timestamp.
-                // This avoids needing to track "the last ID used" ourselves.
-                const newId = Date.now().toString();
+            readRecipeFilesForEditing(res, (recipes, ingredients) => {
+                recipes.push({
+                    id: newId,
+                    name: newRecipe.name,
+                    instructions: newRecipe.instructions
+                });
 
-                fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not read recipes');
-                        return;
-                    }
-
-                    const recipes = parseCSV(recipesData);
-                    recipes.push({
-                        id: newId,
-                        name: newRecipe.name,
-                        instructions: newRecipe.instructions
-                    });
-
-                    fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not read recipe ingredients');
-                            return;
-                        }
-
-                        const ingredients = parseCSV(ingredientsData);
-
-                        // Add one row per ingredient, all linked to this recipe's id
-                        newRecipe.ingredients.forEach(ing => {
-                            ingredients.push({
-                                recipe_id: newId,
-                                ingredient_name: ing.name,
-                                quantity: ing.quantity,
-                                unit: ing.unit
-                            });
-                        });
-
-                        fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], recipes), 'utf8', (err) => {
-                            if (err) {
-                                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                                res.end('Could not save recipes');
-                                return;
-                            }
-
-                            fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], ingredients), 'utf8', (err) => {
-                                if (err) {
-                                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                                    res.end('Could not save recipe ingredients');
-                                    return;
-                                }
-
-                                res.writeHead(200, { 'Content-Type': 'application/json' });
-                                res.end(JSON.stringify({ id: newId, ...newRecipe }));
-                            });
-                        });
+                // Add one row per ingredient, all linked to this recipe's id
+                newRecipe.ingredients.forEach(ing => {
+                    ingredients.push({
+                        recipe_id: newId,
+                        ingredient_name: ing.name,
+                        quantity: ing.quantity,
+                        unit: ing.unit
                     });
                 });
+
+                saveRecipeFiles(res, recipes, ingredients, { id: newId, ...newRecipe });
             });
-            return;
-        }
+        }));
+        return;
+    }
 
-        // ---- PUT: update an existing recipe by id ----
-        // Same idea as POST (create), but instead of adding a new row,
-        // we replace the existing recipe's data and completely swap out
-        // its ingredient rows for the new set.
-        if (req.url.startsWith('/recipes/') && req.method === 'PUT') {
-            const recipeId = req.url.replace('/recipes/', '');
+    // ---- PUT: update an existing recipe by id ----
+    // Same idea as POST (create), but instead of adding a new row,
+    // we replace the existing recipe's data and completely swap out
+    // its ingredient rows for the new set.
+    if (req.url.startsWith('/recipes/') && req.method === 'PUT') {
+        const recipeId = req.url.replace('/recipes/', '');
 
-            let body = '';
-            req.on('data', chunk => { body += chunk; });
-            req.on('end', () => {
-                const updatedRecipe = parseJsonBody(body, res);
-                if (!updatedRecipe) return;
+        readJsonBody(req, res, updatedRecipe => runOneAtATime(res, () => {
+            readRecipeFilesForEditing(res, (recipes, ingredients) => {
+                // Find the recipe being edited and update its fields
+                // in place, keeping the same id.
+                const recipe = recipes.find(r => r.id === recipeId);
+                if (!recipe) return sendText(res, 404, 'Recipe not found');
 
-                fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not read recipes');
-                        return;
-                    }
+                recipe.name = updatedRecipe.name;
+                recipe.instructions = updatedRecipe.instructions;
 
-                    const recipes = parseCSV(recipesData);
+                // Remove this recipe's OLD ingredient rows, then add
+                // the new set. It's simpler and safer than trying to
+                // match old ingredients to new ones one-by-one.
+                const otherIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
 
-                    // Find the recipe being edited and update its fields
-                    // in place, keeping the same id.
-                    const recipe = recipes.find(r => r.id === recipeId);
-                    if (!recipe) {
-                        res.writeHead(404, { 'Content-Type': 'text/plain' });
-                        res.end('Recipe not found');
-                        return;
-                    }
-                    recipe.name = updatedRecipe.name;
-                    recipe.instructions = updatedRecipe.instructions;
-
-                    fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not read recipe ingredients');
-                            return;
-                        }
-
-                        const ingredients = parseCSV(ingredientsData);
-
-                        // Remove this recipe's OLD ingredient rows, then add
-                        // the new set. It's simpler and safer than trying to
-                        // match old ingredients to new ones one-by-one.
-                        const otherIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
-
-                        updatedRecipe.ingredients.forEach(ing => {
-                            otherIngredients.push({
-                                recipe_id: recipeId,
-                                ingredient_name: ing.name,
-                                quantity: ing.quantity,
-                                unit: ing.unit
-                            });
-                        });
-
-                        fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], recipes), 'utf8', (err) => {
-                            if (err) {
-                                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                                res.end('Could not save recipes');
-                                return;
-                            }
-
-                            fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], otherIngredients), 'utf8', (err) => {
-                                if (err) {
-                                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                                    res.end('Could not save recipe ingredients');
-                                    return;
-                                }
-
-                                res.writeHead(200, { 'Content-Type': 'application/json' });
-                                res.end(JSON.stringify({ id: recipeId, ...updatedRecipe }));
-                            });
-                        });
+                updatedRecipe.ingredients.forEach(ing => {
+                    otherIngredients.push({
+                        recipe_id: recipeId,
+                        ingredient_name: ing.name,
+                        quantity: ing.quantity,
+                        unit: ing.unit
                     });
                 });
+
+                saveRecipeFiles(res, recipes, otherIngredients, { id: recipeId, ...updatedRecipe });
             });
-            return;
-        }
+        }));
+        return;
+    }
 
-        // ---- DELETE a single recipe by id ----
-        // URL looks like /recipes/1234567890 - we need to pull the id
-        // out of the end of the URL.
-        if (req.url.startsWith('/recipes/') && req.method === 'DELETE') {
-            const recipeId = req.url.replace('/recipes/', '');
+    // ---- DELETE a single recipe by id ----
+    // URL looks like /recipes/1234567890 - we need to pull the id
+    // out of the end of the URL.
+    if (req.url.startsWith('/recipes/') && req.method === 'DELETE') {
+        const recipeId = req.url.replace('/recipes/', '');
 
-            fs.readFile(RECIPES_FILE, 'utf8', (err, recipesData) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read recipes');
-                    return;
-                }
-
-                const recipes = parseCSV(recipesData);
-
+        runOneAtATime(res, () => {
+            readRecipeFilesForEditing(res, (recipes, ingredients) => {
                 // Keep every recipe EXCEPT the one being deleted
                 const remainingRecipes = recipes.filter(r => r.id !== recipeId);
 
-                fs.readFile(RECIPE_INGREDIENTS_FILE, 'utf8', (err, ingredientsData) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not read recipe ingredients');
-                        return;
-                    }
+                // Also remove any ingredient rows that belonged to
+                // this recipe, otherwise they'd be orphaned - pointing
+                // to a recipe_id that no longer exists anywhere.
+                const remainingIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
 
-                    const ingredients = parseCSV(ingredientsData);
+                saveRecipeFiles(res, remainingRecipes, remainingIngredients, { deleted: recipeId });
+            });
+        });
+        return;
+    }
 
-                    // Also remove any ingredient rows that belonged to
-                    // this recipe, otherwise they'd be orphaned - pointing
-                    // to a recipe_id that no longer exists anywhere.
-                    const remainingIngredients = ingredients.filter(ing => ing.recipe_id !== recipeId);
 
-                    fs.writeFile(RECIPES_FILE, stringifyGenericCSV(['id', 'name', 'instructions'], remainingRecipes), 'utf8', (err) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not save recipes');
-                            return;
-                        }
+    // ---- List the household members who can vote ----
+    if (req.url === '/household-members' && req.method === 'GET') {
+        sendJson(res, HOUSEHOLD_MEMBERS);
+        return;
+    }
 
-                        fs.writeFile(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(['recipe_id', 'ingredient_name', 'quantity', 'unit'], remainingIngredients), 'utf8', (err) => {
-                            if (err) {
-                                res.writeHead(500, { 'Content-Type': 'text/plain' });
-                                res.end('Could not save recipe ingredients');
-                                return;
-                            }
+    // ---- Cast (or change) a vote on a recipe ----
+    // URL looks like /recipes/1234567890/votes
+    if (req.url.match(/^\/recipes\/[^/]+\/votes$/) && req.method === 'POST') {
+        const recipeId = req.url.split('/')[2];
 
-                            res.writeHead(200, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ deleted: recipeId }));
-                        });
-                    });
+        readJsonBody(req, res, voteBody => runOneAtATime(res, () => {
+            const { person, vote } = voteBody;
+
+            fs.readFile(RECIPE_VOTES_FILE, 'utf8', (err, votesData) => {
+                if (err) return sendText(res, 500, 'Could not read recipe votes');
+
+                const votes = parseCSV(votesData);
+
+                // If this person already voted on this recipe, update
+                // their existing vote rather than adding a duplicate row.
+                const existingVote = votes.find(v => v.recipe_id === recipeId && v.person === person);
+
+                if (existingVote) {
+                    existingVote.vote = vote;
+                } else {
+                    votes.push({ recipe_id: recipeId, person, vote });
+                }
+
+                writeFileSafely(RECIPE_VOTES_FILE, stringifyGenericCSV(RECIPE_VOTE_HEADERS, votes), (err) => {
+                    if (err) return sendText(res, 500, 'Could not save recipe votes');
+                    sendJson(res, { recipe_id: recipeId, person, vote });
                 });
             });
-            return;
-        }
+        }));
+        return;
+    }
 
+    // ---- Combined inventory across all four sections ----
+    // Used by the Recipes page to check "do we have enough of
+    // this ingredient anywhere in the house?"
+    if (req.url === '/inventory-all' && req.method === 'GET') {
+        readAllInventory((err, items) => {
+            if (err) return sendText(res, 500, 'Could not read inventory');
+            sendJson(res, items);
+        });
+        return;
+    }
 
-        // ---- List the household members who can vote ----
-        if (req.url === '/household-members' && req.method === 'GET') {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(HOUSEHOLD_MEMBERS));
-            return;
-        }
+    // ---- All known item names (for dropdown/autocomplete suggestions) ----
+    if (req.url === '/item-names' && req.method === 'GET') {
+        getAllItemNames((err, names) => {
+            if (err) return sendText(res, 500, 'Could not read item names');
+            sendJson(res, names);
+        });
+        return;
+    }
 
-        // ---- Cast (or change) a vote on a recipe ----
-        // URL looks like /recipes/1234567890/votes
-        if (req.url.match(/^\/recipes\/[^/]+\/votes$/) && req.method === 'POST') {
-            const recipeId = req.url.split('/')[2];
+    // ---- All known ingredient aliases ----
+    if (req.url === '/ingredient-aliases' && req.method === 'GET') {
+        readAliases((err, aliases) => {
+            if (err) return sendText(res, 500, 'Could not read ingredient aliases');
+            sendJson(res, aliases);
+        });
+        return;
+    }
 
-            let body = '';
-            req.on('data', chunk => { body += chunk; });
-            req.on('end', () => {
-                const voteBody = parseJsonBody(body, res);
-                if (!voteBody) return;
-                const { person, vote } = voteBody;
-
-                fs.readFile(RECIPE_VOTES_FILE, 'utf8', (err, votesData) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not read recipe votes');
-                        return;
-                    }
-
-                    const votes = parseCSV(votesData);
-
-                    // If this person already voted on this recipe, update
-                    // their existing vote rather than adding a duplicate row.
-                    const existingVote = votes.find(v => v.recipe_id === recipeId && v.person === person);
-
-                    if (existingVote) {
-                        existingVote.vote = vote;
-                    } else {
-                        votes.push({ recipe_id: recipeId, person, vote });
-                    }
-
-                    fs.writeFile(RECIPE_VOTES_FILE, stringifyGenericCSV(['recipe_id', 'person', 'vote'], votes), 'utf8', (err) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not save recipe votes');
-                            return;
-                        }
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ recipe_id: recipeId, person, vote }));
-                    });
-                });
-            });
-            return;
-        }
-    
-        // ---- Combined inventory across all four sections ----
-        // Used by the Recipes page to check "do we have enough of
-        // this ingredient anywhere in the house?"
-        if (req.url === '/inventory-all' && req.method === 'GET') {
-            readAllInventory((err, items) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read inventory');
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(items));
-            });
-            return;
-        }
-
-        // ---- All known item names (for dropdown/autocomplete suggestions) ----
-        if (req.url === '/item-names' && req.method === 'GET') {
-            getAllItemNames((err, names) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read item names');
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(names));
-            });
-            return;
-        }
-
-        // ---- All known ingredient aliases ----
-        if (req.url === '/ingredient-aliases' && req.method === 'GET') {
+    // ---- Add a new alias ----
+    if (req.url === '/ingredient-aliases' && req.method === 'POST') {
+        readJsonBody(req, res, ({ alias, canonical_name }) => runOneAtATime(res, () => {
             readAliases((err, aliases) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read ingredient aliases');
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(aliases));
-            });
-            return;
-        }
+                if (err) return sendText(res, 500, 'Could not read ingredient aliases');
 
-        // ---- Add a new alias ----
-        if (req.url === '/ingredient-aliases' && req.method === 'POST') {
-            let body = '';
-            req.on('data', chunk => { body += chunk; });
-            req.on('end', () => {
-                let alias, canonical_name;
-                try {
-                    ({ alias, canonical_name } = JSON.parse(body));
-                } catch (err) {
-                    res.writeHead(400, { 'Content-Type': 'text/plain' });
-                    res.end('Invalid JSON in request body');
-                    return;
+                // If this exact alias already exists, update which
+                // canonical name it points to rather than adding a
+                // duplicate row.
+                const existing = aliases.find(a => a.alias.toLowerCase() === alias.toLowerCase());
+
+                if (existing) {
+                    existing.canonical_name = canonical_name;
+                } else {
+                    aliases.push({ alias, canonical_name });
                 }
 
-                readAliases((err, aliases) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not read ingredient aliases');
-                        return;
-                    }
-
-                    // If this exact alias already exists, update which
-                    // canonical name it points to rather than adding a
-                    // duplicate row.
-                    const existing = aliases.find(a => a.alias.toLowerCase() === alias.toLowerCase());
-
-                    if (existing) {
-                        existing.canonical_name = canonical_name;
-                    } else {
-                        aliases.push({ alias, canonical_name });
-                    }
-
-                    saveAliases(aliases, (err) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not save ingredient aliases');
-                            return;
-                        }
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify({ alias, canonical_name }));
-                    });
+                saveAliases(aliases, (err) => {
+                    if (err) return sendText(res, 500, 'Could not save ingredient aliases');
+                    sendJson(res, { alias, canonical_name });
                 });
             });
-            return;
-        }
+        }));
+        return;
+    }
 
-        // req.url looks like "/pantry" - strip the leading slash to get
-        // just the section name.
-        const section = req.url.replace('/', '');
+    // req.url looks like "/pantry" - strip the leading slash to get
+    // just the section name.
+    const section = req.url.replace('/', '');
 
-        if (!csvFiles[section]) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('Unknown section: ' + section);
-            return;
-        }
+    if (!csvFiles[section]) {
+        sendText(res, 404, 'Unknown section: ' + section);
+        return;
+    }
 
-        // ---- GET: return this section's items ----
-        if (req.method === 'GET') {
-            readItems(section, (err, items) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not read ' + csvFiles[section]);
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify(items));
-            });
-            return;
-        }
+    // ---- GET: return this section's items ----
+    if (req.method === 'GET') {
+        readItems(section, (err, items) => {
+            if (err) return sendText(res, 500, 'Could not read ' + csvFiles[section]);
+            sendJson(res, items);
+        });
+        return;
+    }
 
-        // ---- POST: add/update an item, save, return the updated list ----
-        if (req.method === 'POST') {
-            let body = '';
-            req.on('data', chunk => { body += chunk; });
+    // ---- POST: add/update an item, save, return the updated list ----
+    if (req.method === 'POST') {
+        readJsonBody(req, res, newItem => runOneAtATime(res, () => {
+            // If this item is weight-based (g or kg), convert it to grams
+            // right away. That way everything stored is in one consistent
+            // unit, and "10kg" + "500g" merge correctly instead of being
+            // treated as two different items.
+            if (isWeightUnit(newItem.unit)) {
+                newItem.quantity = toGrams(newItem.quantity, newItem.unit);
+                newItem.unit = 'g';
+            }
 
-            req.on('end', () => {
-                const newItem = parseJsonBody(body, res);
-                if (!newItem) return;
-                // If this item is weight-based (g or kg), convert it to grams
-                // right away. That way everything stored is in one consistent
-                // unit, and "10kg" + "500g" merge correctly instead of being
-                // treated as two different items.
-                if (isWeightUnit(newItem.unit)) {
-                    newItem.quantity = toGrams(newItem.quantity, newItem.unit);
-                    newItem.unit = 'g';
-                }
-
-                // If this item is volume-based (ml or l), convert it to
-                // millilitres right away, same reasoning as the weight
-                // conversion above - one consistent unit so merging works.
-                if (isVolumeUnit(newItem.unit)) {
+            // If this item is volume-based (ml or l), convert it to
+            // millilitres right away, same reasoning as the weight
+            // conversion above - one consistent unit so merging works.
+            if (isVolumeUnit(newItem.unit)) {
                 newItem.quantity = toMilliliters(newItem.quantity, newItem.unit);
                 newItem.unit = 'ml';
+            }
+
+            readItems(section, (err, items) => {
+                if (err) return sendText(res, 500, 'Could not read ' + csvFiles[section]);
+
+                // Same merge logic your old addItem() used: find a
+                // matching item by name AND unit, adjust its quantity.
+                const existingItem = items.find(i =>
+                    i.name.toLowerCase() === newItem.name.toLowerCase() &&
+                    i.unit === newItem.unit
+                );
+
+                if (existingItem) {
+                    existingItem.quantity = Number(existingItem.quantity) + Number(newItem.quantity);
+
+                    if (existingItem.quantity <= 0) {
+                        items = items.filter(i =>
+                            !(i.name.toLowerCase() === newItem.name.toLowerCase() && i.unit === newItem.unit)
+                        );
+                    }
+                } else {
+                    items.push(newItem);
                 }
 
-                readItems(section, (err, items) => {
-                    if (err) {
-                        res.writeHead(500, { 'Content-Type': 'text/plain' });
-                        res.end('Could not read ' + csvFiles[section]);
-                        return;
-                    }
-
-                    // Same merge logic your old addItem() used: find a
-                    // matching item by name AND unit, adjust its quantity.
-                    const existingItem = items.find(i =>
-                        i.name.toLowerCase() === newItem.name.toLowerCase() &&
-                        i.unit === newItem.unit
-                    );
-
-                    if (existingItem) {
-                        existingItem.quantity = Number(existingItem.quantity) + Number(newItem.quantity);
-
-                        if (existingItem.quantity <= 0) {
-                            items = items.filter(i =>
-                                !(i.name.toLowerCase() === newItem.name.toLowerCase() && i.unit === newItem.unit)
-                            );
-                        }
-                    } else {
-                        items.push(newItem);
-                    }
-
-                    saveItems(section, items, (err) => {
-                        if (err) {
-                            res.writeHead(500, { 'Content-Type': 'text/plain' });
-                            res.end('Could not save ' + csvFiles[section]);
-                            return;
-                        }
-                        res.writeHead(200, { 'Content-Type': 'application/json' });
-                        res.end(JSON.stringify(items));
-                    });
+                saveItems(section, items, (err) => {
+                    if (err) return sendText(res, 500, 'Could not save ' + csvFiles[section]);
+                    sendJson(res, items);
                 });
             });
-            return;
-        }
+        }));
+        return;
+    }
 
-        // ---- DELETE: clear this section back to empty ----
-        if (req.method === 'DELETE') {
+    // ---- DELETE: clear this section back to empty ----
+    if (req.method === 'DELETE') {
+        runOneAtATime(res, () => {
             saveItems(section, [], (err) => {
-                if (err) {
-                    res.writeHead(500, { 'Content-Type': 'text/plain' });
-                    res.end('Could not clear ' + csvFiles[section]);
-                    return;
-                }
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify([]));
+                if (err) return sendText(res, 500, 'Could not clear ' + csvFiles[section]);
+                sendJson(res, []);
             });
-            return;
-        }
+        });
+        return;
+    }
 
-        res.writeHead(405, { 'Content-Type': 'text/plain' });
-        res.end('Method not allowed');
-    });
+    sendText(res, 405, 'Method not allowed');
+});
 
-    server.listen(PORT, '127.0.0.1', () => {
-        console.log(`Server is running at http://localhost:${PORT}`);
-    });
+server.listen(PORT, '127.0.0.1', () => {
+    console.log(`Server is running at http://localhost:${PORT}`);
+});

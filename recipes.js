@@ -29,6 +29,9 @@ let currentInventory = [];
 // differently-worded names for the same thing still match.
 let currentAliases = [];
 
+// The same aliases as a quick lookup table - see buildAliasLookup().
+let aliasLookup = new Map();
+
 // Who's currently selected in the "Who's voting?" dropdown.
 // Empty string means nobody's picked yet.
 let currentPerson = '';
@@ -87,6 +90,21 @@ function formatQuantity(quantity, unit) {
 }
 
 // -------------------------------------------------------------
+// Makes typed text safe to drop into an HTML string. Without this,
+// a recipe or ingredient name containing a quote mark or a < sign
+// (e.g. Mum's "Famous" Pie) could break the page layout, or cut
+// off the value shown in an Edit box half-way through.
+// -------------------------------------------------------------
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// -------------------------------------------------------------
 // Looks up a name in the alias list and returns its canonical
 // name if one exists (e.g. "Beef Mince" -> "Mince"), otherwise
 // just returns the name unchanged. Used by checkRecipeAvailability
@@ -94,8 +112,27 @@ function formatQuantity(quantity, unit) {
 // differently and still be recognised as the same ingredient.
 // -------------------------------------------------------------
 function resolveIngredientName(name, aliases) {
-    const match = aliases.find(a => a.alias.toLowerCase() === name.toLowerCase());
-    return match ? match.canonical_name : name;
+    const match = aliases.get(name.toLowerCase());
+    return match !== undefined ? match : name;
+}
+
+// -------------------------------------------------------------
+// Turns the alias list into a lookup table (lowercase alias ->
+// canonical name), so resolveIngredientName() above can find a
+// match in one step instead of searching the whole alias list
+// every time. Built once each time the data loads, rather than
+// re-searching for every ingredient of every recipe on every
+// keystroke in the filter boxes.
+// -------------------------------------------------------------
+function buildAliasLookup(aliases) {
+    const lookup = new Map();
+    aliases.forEach(a => {
+        const key = a.alias.toLowerCase();
+        // Keep the FIRST one if an alias is ever listed twice -
+        // same result the old one-by-one search used to give.
+        if (!lookup.has(key)) lookup.set(key, a.canonical_name);
+    });
+    return lookup;
 }
 
 // -------------------------------------------------------------
@@ -121,9 +158,11 @@ function checkRecipeAvailability(recipe, inventory, aliases) {
         // If the units don't match (e.g. recipe wants "each" but you
         // only have it in grams), we can't compare them fairly, so
         // it's treated the same as having zero.
+        const neededCanonicalKey = neededCanonicalName.toLowerCase();
         const match = inventory.find(item => {
-            const itemCanonicalName = resolveIngredientName(item.name, aliases);
-            return itemCanonicalName.toLowerCase() === neededCanonicalName.toLowerCase() &&
+            // canonicalKey is worked out once per pantry item when the
+            // data loads (see loadEverything), not once per check.
+            return item.canonicalKey === neededCanonicalKey &&
                 item.unit === needed.unit;
         });
 
@@ -152,7 +191,7 @@ function loadItemNameSuggestions() {
         .then(names => {
             const datalist = document.getElementById('ingredient-names-list');
             datalist.innerHTML = names
-                .map(name => `<option value="${name}"></option>`)
+                .map(name => `<option value="${escapeHtml(name)}"></option>`)
                 .join('');
         })
         .catch(error => {
@@ -322,8 +361,8 @@ function addIngredientRow(existing = null) {
     const unit = existing ? existing.unit : 'g';
 
     row.innerHTML = `
-        <input type="text" class="ingredient-name" placeholder="Ingredient Name" value="${name}" list="ingredient-names-list">
-        <input type="number" class="ingredient-quantity" placeholder="Quantity" value="${quantity}">
+        <input type="text" class="ingredient-name" placeholder="Ingredient Name" value="${escapeHtml(name)}" list="ingredient-names-list">
+        <input type="number" class="ingredient-quantity" placeholder="Quantity" value="${escapeHtml(quantity)}">
         <select class="ingredient-unit">
             <option value="g">grams (g)</option>
             <option value="kg">kilograms (kg)</option>
@@ -484,9 +523,17 @@ function loadEverything() {
     ])
         .then(([recipes, inventory, people, aliases]) => {
             currentRecipes = recipes;
-            currentInventory = inventory;
             currentHouseholdMembers = people;
             currentAliases = aliases;
+            aliasLookup = buildAliasLookup(aliases);
+
+            // Work out each pantry item's canonical name ONCE here,
+            // so checkRecipeAvailability() doesn't have to redo it
+            // for every ingredient of every recipe on every re-render.
+            currentInventory = inventory.map(item => ({
+                ...item,
+                canonicalKey: resolveIngredientName(item.name, aliasLookup).toLowerCase()
+            }));
             populatePersonDropdown(people);
             populateVoteFilterOptions(people);
 
@@ -511,7 +558,7 @@ function renderVotes(recipe) {
     const voteListHTML = currentHouseholdMembers.map(person => {
         const personVote = recipe.votes.find(v => v.person === person);
         const display = personVote ? voteEmojis[personVote.vote] : 'no vote';
-        return `<li>${person}: ${display}</li>`;
+        return `<li>${escapeHtml(person)}: ${display}</li>`;
     }).join('');
 
     return `
@@ -537,25 +584,25 @@ function renderRecipes(recipes) {
 
         // Turn the ingredients array into a simple bullet list of text
         const ingredientsHTML = recipe.ingredients
-            .map(ing => `<li>${ing.ingredient_name} — ${ing.quantity} ${ing.unit}</li>`)
+            .map(ing => `<li>${escapeHtml(ing.ingredient_name)} — ${escapeHtml(ing.quantity)} ${escapeHtml(ing.unit)}</li>`)
             .join('');
 
-        const availability = checkRecipeAvailability(recipe, currentInventory, currentAliases);
+        const availability = checkRecipeAvailability(recipe, currentInventory, aliasLookup);
 
         // Show a clear yes/no plus, if missing anything, a list of
         // exactly what and how much more is needed.
         const availabilityHTML = availability.canMake
             ? `<p class="can-make">✅ You can make this!</p>`
             : `<p class="cannot-make">❌ Missing:</p><ul class="missing-list">${
-                  availability.missing.map(m => `<li>${m}</li>`).join('')
+                  availability.missing.map(m => `<li>${escapeHtml(m)}</li>`).join('')
               }</ul>`;
 
         // data-id stores the recipe's id directly on each button, so
         // when clicked we know exactly which recipe it refers to.
         card.innerHTML = `
-            <h3>${recipe.name}</h3>
+            <h3>${escapeHtml(recipe.name)}</h3>
             <ul>${ingredientsHTML}</ul>
-            <p>${recipe.instructions}</p>
+            <p>${escapeHtml(recipe.instructions)}</p>
             ${availabilityHTML}
             ${renderVotes(recipe)}
             <button type="button" class="edit-recipe-btn" data-id="${recipe.id}">Edit</button>

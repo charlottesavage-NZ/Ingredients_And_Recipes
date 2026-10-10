@@ -6,3 +6,6 @@ dev-server.js
 # Live household data - the garage server owns these, so a pull
 # must never overwrite them with the copies from this computer
 *.csv
+
+# Half-finished saves from writeFileSafely() in server.js
+*.tmp

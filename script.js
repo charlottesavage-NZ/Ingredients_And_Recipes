@@ -9,6 +9,21 @@
 const SERVER_URL = '/recipes';
 
 // -------------------------------------------------------------
+// Makes typed text safe to drop into an HTML string, so an item
+// name containing a quote mark (e.g. Nana's "Best" Jam) can't cut
+// a suggestion off half-way or break the page. Same function as
+// in recipes.js - each page has its own script file.
+// -------------------------------------------------------------
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// -------------------------------------------------------------
 // Converts a gram amount back into a friendly display format
 // (e.g. 10500g becomes 10.5 kg). The server stores everything
 // in grams, but we don't want to show Charlotte/Todd/Kayleigh
@@ -55,7 +70,7 @@ function loadItemNameSuggestions() {
         .then(names => {
             const datalist = document.getElementById('item-names-list');
             datalist.innerHTML = names
-                .map(name => `<option value="${name}"></option>`)
+                .map(name => `<option value="${escapeHtml(name)}"></option>`)
                 .join('');
         })
         .catch(error => {
