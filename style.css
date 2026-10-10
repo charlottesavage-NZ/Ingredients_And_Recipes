@@ -33,10 +33,11 @@
 
 body {
     /* To change the fonts available, alter font-family here */
-    /* (Now the device's own clean system font - Segoe UI on Windows,
-       San Francisco on iPhone/Mac, Roboto on Android - which is
-       much easier on the eyes than Georgia for lots of small text.) */
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* (Now Trebuchet MS - a clean, friendly font that's on almost
+       every computer and phone - with Arial as the backup if a device
+       doesn't have it. Easier on the eyes than Georgia for lots of
+       small text.) */
+    font-family: "Trebuchet MS", Arial, sans-serif;
     font-size: 16px;
     line-height: 1.5;
 
@@ -77,9 +78,7 @@ body {
 
 /* The page title itself - a tidy size rather than huge. */
 .header h1 {
-    font-size: 2rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-size: 30px;
 }
 
 /* Navigation bar sitting under the page title (Inventory / Recipes /
@@ -96,8 +95,7 @@ body {
 .main-nav a {
     color: white;
     text-decoration: none;
-    font-size: 0.95rem;
-    font-weight: 500;
+    font-size: 15px;
     text-shadow: none;
     padding: 8px 18px;
     border-radius: var(--radius);
@@ -131,7 +129,7 @@ body {
     }
 
     .header h1 {
-        font-size: 1.5rem;
+        font-size: 22px;
     }
 
     .main-nav {
@@ -139,7 +137,7 @@ body {
     }
 
     .main-nav a {
-        font-size: 0.85rem;
+        font-size: 13px;
         padding: 6px 12px;
     }
 }
@@ -176,15 +174,15 @@ main {
 
 /* Section headers (e.g. "What's in the House?") */
 .inventory-section h2 {
-    font-size: 1.25rem;
-    font-weight: 650;
+    font-size: 20px;
+    font-weight: bold;
     margin-bottom: 12px;
 }
 
 /* Sub-headers for item lists (e.g. "Pantry Items") */
 .inventory-section h3 {
-    font-size: 1.05rem;
-    font-weight: 650;
+    font-size: 17px;
+    font-weight: bold;
     margin-top: 4px;
     margin-bottom: 10px;
 }
@@ -193,13 +191,13 @@ main {
    slightly quieter than the main content. */
 .inventory-section > p {
     color: var(--text-muted);
-    font-size: 0.95rem;
+    font-size: 15px;
 }
 
 /* Labels sit slightly bolder and quieter than normal text. */
 label {
-    font-size: 0.9rem;
-    font-weight: 500;
+    font-size: 14px;
+    font-weight: bold;
     color: var(--text-muted);
 }
 
@@ -236,9 +234,8 @@ button[type="submit"] {
     color: white;
     cursor: pointer;
     font-family: inherit;
-    font-size: 0.95rem;
-    font-weight: 600;
-    transition: background 0.15s ease;
+    font-size: 15px;
+    font-weight: bold;
 }
 
 /* Optional: button hover effect */
@@ -289,7 +286,7 @@ select {
     background-color: var(--input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.95rem;
+    font-size: 15px;
 }
 
 /* Optional: style the input boxes */
@@ -302,7 +299,7 @@ textarea {
     background: var(--input);
     color: var(--text);
     font-family: inherit;
-    font-size: 0.95rem;
+    font-size: 15px;
 }
 
 /* A purple glow around whichever box you're typing in, so it's
@@ -341,7 +338,7 @@ option {
     width: 100%;
     border-collapse: collapse;
     margin-top: 15px;
-    font-size: 0.95rem;
+    font-size: 15px;
 }
 
 .price-results-table th,
@@ -352,10 +349,8 @@ option {
 }
 
 .price-results-table th {
-    font-weight: 600;
-    font-size: 0.8rem;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    font-weight: bold;
+    font-size: 13px;
     color: var(--text-muted);
 }
 
@@ -392,7 +387,7 @@ option {
 }
 
 .price-field label {
-    font-size: 0.8rem;
+    font-size: 13px;
 }
 
 /* The Store dropdown is capped in width - otherwise the long "Our 3
@@ -450,7 +445,7 @@ option {
 /* "Showing the 10 most recently checked products..." - kept quiet
    so it reads as a hint, not a price. */
 .price-history-note {
-    font-size: 0.85rem;
+    font-size: 13px;
     font-style: italic;
     color: var(--text-muted);
 }
@@ -592,7 +587,7 @@ option {
 }
 
 .recipe-card h3 {
-    font-size: 1.15rem;
+    font-size: 18px;
 }
 
 .recipe-card ul {
@@ -645,8 +640,9 @@ option {
 /* (Now the same deep purple as the cards, fully solid.) */
 .made-dialog {
     margin: auto;
-    width: min(560px, calc(100vw - 32px));
-    max-height: calc(100vh - 32px);
+    width: 560px;
+    max-width: 95%;
+    max-height: 90vh;
     padding: 22px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: var(--radius);
@@ -662,7 +658,7 @@ option {
 }
 
 .made-dialog h3 {
-    font-size: 1.15rem;
+    font-size: 18px;
     margin-bottom: 6px;
 }
 
@@ -713,7 +709,7 @@ option {
 }
 
 .can-make {
-    font-weight: 600;
+    font-weight: bold;
     color: var(--success);
 }
 
@@ -726,5 +722,5 @@ option {
     gap: 16px;
     flex-wrap: wrap;
     color: var(--text-muted);
-    font-size: 0.95rem;
+    font-size: 15px;
 }

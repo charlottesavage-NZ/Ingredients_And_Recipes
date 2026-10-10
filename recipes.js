@@ -768,7 +768,7 @@ function renderRecipes(recipes) {
             ${renderInstructions(recipe.instructions)}
             ${availabilityHTML}
             ${renderVotes(recipe)}
-            <button type="button" class="made-recipe-btn" data-id="${recipe.id}">🍳 I made this</button>
+            <button type="button" class="made-recipe-btn" data-id="${recipe.id}">I made this</button>
             <button type="button" class="edit-recipe-btn" data-id="${recipe.id}">Edit</button>
             <button type="button" class="delete-recipe-btn" data-id="${recipe.id}">Delete</button>
         `;
