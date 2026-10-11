@@ -19,7 +19,12 @@ const { TRENTS_USERNAME, TRENTS_PASSWORD } = require('./credentials');
 
 // The big built-in ingredient list and US -> NZ name aliases (e.g.
 // "Ground Beef" -> "Mince") - see ingredient-data.js for the details.
-const { BUILT_IN_ALIASES, EXTRA_INGREDIENT_NAMES, TINNED_GOODS, DEFAULT_TIN_SIZE } = require('./ingredient-data');
+// (UPDATE, phase 3: the built-in aliases, tin sizes and suggestion
+// names moved into the database - the ingredients and
+// ingredient_aliases tables - so ingredient-data.js isn't read any
+// more. Only the standard tin size stays here, for anything that
+// comes in tins but isn't in the ingredients table with its own size.)
+const DEFAULT_TIN_SIZE = { quantity: 400, unit: 'g' };
 
 // The Azure SQL database - see database.js. Until the gitignored
 // database-config.js file exists, database.enabled is false and
@@ -454,8 +459,20 @@ function readRowsAsync(filePath) {
 
 // Saves a whole list in place of what was there before (like
 // re-writing the whole CSV file).
+// (UPDATE, phase 3: rows that point at an ingredient get linked to it
+// first - see linkIngredients() - and the remembered ingredient list
+// is forgotten afterwards, in case the save added a new ingredient.)
 function saveRows(filePath, rows, callback) {
-    database.replaceRows(filePath, rows, err => callback(err));
+    const nameField = INGREDIENT_NAME_FIELDS[filePath];
+    if (!nameField) return database.replaceRows(filePath, rows, err => callback(err));
+
+    linkIngredients(rows, nameField, err => {
+        if (err) return callback(err);
+        database.replaceRows(filePath, rows, err => {
+            forgetAliases();
+            callback(err);
+        });
+    });
 }
 
 // Reads a section's CSV file and hands back the parsed items.
@@ -514,13 +531,19 @@ function readRecipeFilesForEditing(res, callback) {
 // ingredients. (Deleting a recipe there also removes its votes and
 // meal plan entries, thanks to ON DELETE CASCADE.)
 // (UPDATE, phase 2: always the database now.)
+// (UPDATE, phase 3: each ingredient is linked to the ingredients
+// table first - see linkIngredients().)
 function saveRecipeFiles(res, recipes, ingredients, replyData) {
-    database.saveMany([
-        { file: RECIPES_FILE, rows: recipes },
-        { file: RECIPE_INGREDIENTS_FILE, rows: ingredients }
-    ], err => {
-        if (err) return sendText(res, 500, 'Could not save recipes');
-        sendJson(res, replyData);
+    linkIngredients(ingredients, 'ingredient_name', err => {
+        if (err) return sendText(res, 500, 'Could not read the ingredients list');
+        database.saveMany([
+            { file: RECIPES_FILE, rows: recipes },
+            { file: RECIPE_INGREDIENTS_FILE, rows: ingredients }
+        ], err => {
+            forgetAliases();
+            if (err) return sendText(res, 500, 'Could not save recipes');
+            sendJson(res, replyData);
+        });
     });
 }
 
@@ -648,18 +671,24 @@ function getAllItemNames(callback) {
             // Then the big built-in list from ingredient-data.js -
             // every name on both sides of the alias list (e.g. both
             // "Cilantro" AND "Coriander"), plus the extra names.
-            Object.entries(BUILT_IN_ALIASES).forEach(([alias, canonical]) => {
-                addName(alias);
-                addName(canonical);
-            });
-            EXTRA_INGREDIENT_NAMES.forEach(addName);
+            // (UPDATE, phase 3: from the database now - every alias on
+            // both sides, and every name in the ingredients table.)
+            readAllAliases((err, aliases) => {
+                if (err) return callback(err, null);
 
-            inventoryItems.forEach(item => addName(item.name));
-            recipes.forEach(recipe => {
-                recipe.ingredients.forEach(ing => addName(ing.ingredient_name));
-            });
+                aliases.forEach(a => {
+                    addName(a.alias);
+                    addName(a.canonical_name);
+                });
+                ingredientList.forEach(ingredient => addName(ingredient.ingredient_name));
 
-            callback(null, Array.from(namesByKey.values()).sort());
+                inventoryItems.forEach(item => addName(item.name));
+                recipes.forEach(recipe => {
+                    recipe.ingredients.forEach(ing => addName(ing.ingredient_name));
+                });
+
+                callback(null, Array.from(namesByKey.values()).sort());
+            });
         });
     });
 }
@@ -790,9 +819,11 @@ function isTinUnit(unit) {
 }
 
 // Tin sizes looked up by the tidied-up name (see normalizeIngredientName).
-const TIN_SIZE_BY_KEY = new Map(
-    TINNED_GOODS.map(good => [normalizeIngredientName(good.name), { quantity: good.quantity, unit: good.unit }])
-);
+// (UPDATE, phase 3: filled in from the ingredients table - its
+// tin_quantity / tin_unit columns - each time readAllAliases() reads
+// it. Every route that works with tins reads the aliases first, so
+// this is always filled in by the time it's needed.)
+let TIN_SIZE_BY_KEY = new Map();
 
 // How big one tin of this item is. Goes through the alias list
 // first, so "Diced Tomatoes" or "Tin of chickpeas" find the right
@@ -1463,8 +1494,14 @@ function readAliases(callback) {
 //   (checked by the file's "last modified" time - so even editing
 //   the file by hand on the garage is picked up straight away)
 // Nothing that uses the list changes it, so it's safe to share.
-const BUILT_IN_ALIAS_LIST = Object.entries(BUILT_IN_ALIASES).map(([alias, canonical_name]) => ({ alias, canonical_name }));
+// (UPDATE, phase 3: the built-in aliases are rows in the database
+// now, so there's no separate built-in list to add on.)
 let aliasListCache = { modified: null, list: null };
+
+// Every ingredient in the ingredients table, e.g. { ingredient_name:
+// "Tinned Tomatoes", tin_quantity: "400", tin_unit: "g", source:
+// "built_in" } - read along with the aliases, and kept with them.
+let ingredientList = [];
 
 // UPDATE: with the database switched on there's no file to check the
 // time of - instead the list is kept until saveAliases() (the only
@@ -1472,12 +1509,71 @@ let aliasListCache = { modified: null, list: null };
 // into the table in SSMS is picked up at the next restart (the
 // garage restarts the server every hour anyway).
 // (UPDATE, phase 2: the file-time check for the CSV was taken out.)
+// (UPDATE, phase 3: also reads the ingredients table - for the tin
+// sizes and for linking names to ingredients, see linkIngredients().)
 function readAllAliases(callback) {
     if (aliasListCache.list) return callback(null, aliasListCache.list);
     readAliases((err, aliases) => {
         if (err) return callback(err, null);
-        aliasListCache = { modified: 'database', list: aliases.concat(BUILT_IN_ALIAS_LIST) };
-        callback(null, aliasListCache.list);
+        readOptionalCsv('ingredients', (err, ingredients) => {
+            if (err) return callback(err, null);
+            ingredientList = ingredients;
+            TIN_SIZE_BY_KEY = new Map(ingredients
+                .filter(ingredient => ingredient.tin_quantity !== '')
+                .map(ingredient => [normalizeIngredientName(ingredient.ingredient_name),
+                    { quantity: Number(ingredient.tin_quantity), unit: ingredient.tin_unit }]));
+            aliasListCache = { modified: 'database', list: aliases };
+            callback(null, aliasListCache.list);
+        });
+    });
+}
+
+// Forgets the remembered aliases and ingredients, so the next
+// readAllAliases() reads them fresh - after anything that might have
+// added an ingredient.
+function forgetAliases() {
+    aliasListCache = { modified: null, list: null };
+}
+
+// -------------------------------------------------------------
+// LINKING NAMES TO INGREDIENTS (UPDATE, phase 3)
+// -------------------------------------------------------------
+// Stock, recipe ingredients, minimums and barcodes keep the name as
+// typed, plus "ingredient" - the ingredient in the ingredients table
+// it counts as. That's worked out the same way the rest of this file
+// matches names (canonicalKey(): capitals, plurals, hyphens don't
+// matter, aliases are followed), then the ingredient with that key is
+// used, e.g. "Ground beef" -> "Mince". A name that matches nothing is
+// its own ingredient, added to the table when it's saved (see
+// addMissingIngredients in database.js).
+//
+// Which field holds the name as typed, for each kind of data:
+const INGREDIENT_NAME_FIELDS = {
+    'pantry.csv': 'name',
+    'fridge.csv': 'name',
+    'freezer.csv': 'name',
+    'chest.csv': 'name',
+    'recipe_ingredients.csv': 'ingredient_name',
+    'stock_minimums.csv': 'name',
+    'barcodes.csv': 'name'
+};
+
+function linkIngredients(rows, nameField, callback) {
+    readAllAliases((err, aliases) => {
+        if (err) return callback(err);
+        const aliasLookup = buildAliasLookup(aliases);
+
+        const ingredientByKey = new Map();
+        ingredientList.forEach(ingredient => {
+            const key = normalizeIngredientName(ingredient.ingredient_name);
+            if (!ingredientByKey.has(key)) ingredientByKey.set(key, ingredient.ingredient_name);
+        });
+
+        rows.forEach(row => {
+            const typed = String(row[nameField] || '').trim();
+            row.ingredient = ingredientByKey.get(canonicalKey(typed, aliasLookup)) || typed;
+        });
+        callback(null);
     });
 }
 
@@ -1485,7 +1581,7 @@ function readAllAliases(callback) {
 // (UPDATE: or the database - see saveRows. Either way the remembered
 // combined list is thrown away, so the next readAllAliases() re-reads it.)
 function saveAliases(aliases, callback) {
-    aliasListCache = { modified: null, list: null };
+    forgetAliases();
     saveRows(ALIASES_FILE, aliases, callback);
 }
 
@@ -2921,14 +3017,21 @@ const server = http.createServer((req, res) => {
 
     // ---- Tin sizes, so the Recipes page can work out tins too ----
     // e.g. { defaultSize: {400 g}, goods: [{ key: "baked bean", quantity: 420, unit: "g" }, ...] }
+    // (UPDATE, phase 3: from the ingredients table - every ingredient
+    // with a tin size.)
     if (req.url === '/tinned-goods' && req.method === 'GET') {
-        sendJson(res, {
-            defaultSize: DEFAULT_TIN_SIZE,
-            goods: TINNED_GOODS.map(good => ({
-                key: normalizeIngredientName(good.name),
-                quantity: good.quantity,
-                unit: good.unit
-            }))
+        readAllAliases(err => {
+            if (err) return sendText(res, 500, 'Could not read the ingredients list');
+            sendJson(res, {
+                defaultSize: DEFAULT_TIN_SIZE,
+                goods: ingredientList
+                    .filter(ingredient => ingredient.tin_quantity !== '')
+                    .map(ingredient => ({
+                        key: normalizeIngredientName(ingredient.ingredient_name),
+                        quantity: Number(ingredient.tin_quantity),
+                        unit: ingredient.tin_unit
+                    }))
+            });
         });
         return;
     }
@@ -2954,10 +3057,13 @@ const server = http.createServer((req, res) => {
                 // duplicate row.
                 const existing = aliases.find(a => a.alias.toLowerCase() === alias.toLowerCase());
 
+                // (UPDATE, phase 3: either way it's now one of YOUR
+                // aliases, even if it started as a built-in one.)
                 if (existing) {
                     existing.canonical_name = canonical_name;
+                    existing.source = 'yours';
                 } else {
-                    aliases.push({ alias, canonical_name });
+                    aliases.push({ alias, canonical_name, source: 'yours' });
                 }
 
                 saveAliases(aliases, (err) => {
@@ -3550,6 +3656,7 @@ const server = http.createServer((req, res) => {
             // (or volume) right away - e.g. 10 tins of tomatoes becomes
             // 4000 g - so it merges with anything already stored in
             // grams. See TINNED_GOODS in ingredient-data.js for sizes.
+            // (UPDATE, phase 3: the sizes are in the ingredients table now.)
             if (isTinUnit(newItem.unit)) {
                 const tin = tinSizeFor(newItem.name, aliasLookup);
                 newItem.quantity = Number(newItem.quantity) * tin.quantity;

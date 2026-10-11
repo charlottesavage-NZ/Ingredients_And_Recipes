@@ -1,9 +1,11 @@
 -- =============================================================
--- CREATE TABLES - the full pantry database (phase 2 design)
+-- CREATE TABLES - the full pantry database (phase 3 design)
 -- =============================================================
 -- For building a NEW, empty database (e.g. a pantry_dev copy for
--- testing). The live database was upgraded from the phase 1 tables
--- with database/phase2-upgrade.sql instead.
+-- testing) - then run database/seed-ingredients.sql to add the
+-- built-in ingredients and aliases. The live database was upgraded
+-- with database/phase2-upgrade.sql and database/ingredients-upgrade.sql
+-- instead.
 --
 -- Run once in SSMS with the ADMIN login, on the target database
 -- (not master). Safe to re-run - each table is only created if it
@@ -65,8 +67,27 @@ END;
 
 
 -- -------------------------------------------------------------
+-- INGREDIENTS - the master list: one row per ingredient (or anything
+-- else stocked, like cat food). Stock, recipe ingredients, minimums,
+-- barcodes and aliases all point at it. tin_quantity / tin_unit = the
+-- size of one tin, for things that come in tins.
+-- -------------------------------------------------------------
+IF OBJECT_ID('dbo.ingredients', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.ingredients (
+        ingredient_name NVARCHAR(200) CONSTRAINT PK_ingredients PRIMARY KEY,
+        tin_quantity    DECIMAL(12,3) NULL,
+        tin_unit        NVARCHAR(20)  NULL,
+        source          NVARCHAR(10)  NOT NULL CONSTRAINT DF_ingredients_source DEFAULT 'yours'
+                        CONSTRAINT CK_ingredients_source CHECK (source IN ('built_in', 'yours'))
+    );
+END;
+
+
+-- -------------------------------------------------------------
 -- INVENTORY - what's in the house: one row per thing, per storage
--- area, per unit (quantities are kept in g / ml / each).
+-- area, per unit (quantities are kept in g / ml / each). name is as
+-- typed; ingredient_name links it to the master list.
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.inventory', 'U') IS NULL
 BEGIN
@@ -75,6 +96,8 @@ BEGIN
                       CONSTRAINT FK_inventory_location REFERENCES dbo.locations(location_code) ON UPDATE CASCADE,
         name          NVARCHAR(200) NOT NULL,
         unit          NVARCHAR(20)  NOT NULL,
+        ingredient_name NVARCHAR(200) NOT NULL
+                      CONSTRAINT FK_inventory_ingredient REFERENCES dbo.ingredients(ingredient_name) ON UPDATE CASCADE,
         quantity      DECIMAL(12,3) NOT NULL,
         track         NVARCHAR(10)  NULL CONSTRAINT CK_inventory_track CHECK (track IN ('have', 'amount')),   -- NULL = guess from the name
         low           BIT NOT NULL CONSTRAINT DF_inventory_low DEFAULT 0,                                   -- marked running low
@@ -99,19 +122,22 @@ END;
 
 
 -- -------------------------------------------------------------
--- RECIPE INGREDIENTS - each ingredient in a recipe. sort_order keeps
--- them in the order the recipe lists them.
+-- RECIPE INGREDIENTS - each ingredient in a recipe: name as the
+-- recipe words it, linked to the master list. sort_order keeps them
+-- in the order the recipe lists them.
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.recipe_ingredients', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.recipe_ingredients (
         recipe_id       NVARCHAR(20)  NOT NULL
                         CONSTRAINT FK_recipe_ingredients_recipe REFERENCES dbo.recipes(recipe_id) ON DELETE CASCADE,
-        ingredient_name NVARCHAR(200) NOT NULL,
+        name            NVARCHAR(200) NOT NULL,
         unit            NVARCHAR(20)  NOT NULL CONSTRAINT DF_recipe_ingredients_unit DEFAULT '',
+        ingredient_name NVARCHAR(200) NOT NULL
+                        CONSTRAINT FK_recipe_ingredients_ingredient REFERENCES dbo.ingredients(ingredient_name) ON UPDATE CASCADE,
         quantity        DECIMAL(12,3) NULL,
         sort_order      INT NOT NULL,
-        CONSTRAINT PK_recipe_ingredients PRIMARY KEY (recipe_id, ingredient_name, unit)
+        CONSTRAINT PK_recipe_ingredients PRIMARY KEY (recipe_id, name, unit)
     );
 END;
 
@@ -149,14 +175,18 @@ END;
 
 
 -- -------------------------------------------------------------
--- INGREDIENT ALIASES - your own alternative names (the built-in
--- list stays in ingredient-data.js).
+-- INGREDIENT ALIASES - alternative names, each pointing at one
+-- ingredient ("Ground Beef" -> "Mince"). source = built_in (from the
+-- built-in list) or yours (added on the site).
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.ingredient_aliases', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.ingredient_aliases (
-        alias          NVARCHAR(200) CONSTRAINT PK_ingredient_aliases PRIMARY KEY,
-        canonical_name NVARCHAR(200) NOT NULL
+        alias           NVARCHAR(200) CONSTRAINT PK_ingredient_aliases PRIMARY KEY,
+        ingredient_name NVARCHAR(200) NOT NULL
+                        CONSTRAINT FK_ingredient_aliases_ingredient REFERENCES dbo.ingredients(ingredient_name) ON UPDATE CASCADE,
+        source          NVARCHAR(10)  NOT NULL CONSTRAINT DF_ingredient_aliases_source DEFAULT 'yours'
+                        CONSTRAINT CK_ingredient_aliases_source CHECK (source IN ('built_in', 'yours'))
     );
 END;
 
@@ -214,6 +244,8 @@ BEGIN
     CREATE TABLE dbo.stock_minimums (
         name    NVARCHAR(200) NOT NULL,
         unit    NVARCHAR(20)  NOT NULL,
+        ingredient_name NVARCHAR(200) NOT NULL
+                CONSTRAINT FK_stock_minimums_ingredient REFERENCES dbo.ingredients(ingredient_name) ON UPDATE CASCADE,
         minimum DECIMAL(12,3) NOT NULL,
         CONSTRAINT PK_stock_minimums PRIMARY KEY (name, unit)
     );
@@ -231,6 +263,8 @@ BEGIN
     CREATE TABLE dbo.barcodes (
         barcode            NVARCHAR(50)  CONSTRAINT PK_barcodes PRIMARY KEY,
         item_name          NVARCHAR(200) NOT NULL,   -- your name for it, e.g. Tinned Tomatoes
+        ingredient_name    NVARCHAR(200) NOT NULL
+                           CONSTRAINT FK_barcodes_ingredient REFERENCES dbo.ingredients(ingredient_name) ON UPDATE CASCADE,
         brand              NVARCHAR(100) NULL,
         product_name       NVARCHAR(300) NULL,       -- full name on the pack
         quantity           DECIMAL(12,3) NULL,       -- pack size
@@ -295,7 +329,7 @@ SELECT v.* FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM dbo.stores s WHERE s.store_name = v.store_name);
 
 
--- Should list 14 tables
+-- Should list 15 tables
 SELECT name AS table_name, create_date
 FROM sys.tables
 ORDER BY name;

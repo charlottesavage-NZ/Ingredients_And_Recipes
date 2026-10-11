@@ -24,6 +24,12 @@
 // reads look the name up from the key, and saves look the key up from
 // the name, both inside the SQL (see "lookup" below).
 //
+// UPDATE, phase 3: the ingredients table. Stock, recipe ingredients,
+// minimums, barcodes and aliases keep the name as typed, plus an
+// "ingredient" value - the ingredient it counts as - which server.js
+// works out (see linkIngredients() there) and this file saves into
+// each table's ingredient_name column, a foreign key to ingredients.
+//
 // The free Azure SQL Database pauses itself when nobody's using it,
 // and every minute it's awake counts against the free monthly
 // allowance. So this file:
@@ -69,6 +75,9 @@ const sql = enabled ? require('mssql') : null;
 //             text) or 'date' (just "2026-10-14")
 // - required: the table column is NOT NULL, so a blank becomes ''
 //             (text) or 0 (number) instead of NULL
+// - orUse:    if this value is blank, use that other column's value
+//             instead (e.g. an ingredient link falls back to the name
+//             as typed, so it's never empty) (UPDATE, phase 3)
 // - lookup:   the table stores another table's KEY, but server.js
 //             works with a NAME. e.g. recipe_votes.person_id holds 2,
 //             server.js sees person: "Todd". { table, key, label,
@@ -101,6 +110,9 @@ const sql = enabled ? require('mssql') : null;
 // - addMissingStores: before saving, any store name not in the
 //             stores table yet is added to it (switched off, with no
 //             store code), so a price is never refused over its store
+// - addMissingIngredients: the same for ingredients - any ingredient
+//             name not in the ingredients table yet is added (as one of
+//             yours) before saving (UPDATE, phase 3)
 // - uniqueTime: when adding rows, two that would share the same key
 //             AND the same millisecond get the second one moved on by
 //             1 ms, so neither is refused
@@ -115,19 +127,28 @@ const STORE_LOOKUP = { table: 'dbo.stores', key: 'store_name', label: 'store_nam
 const LOCATION_CODE_LOOKUP = { table: 'dbo.locations', key: 'location_code', label: 'location_code', match: ['location_code', 'location_name'] };
 const LOCATION_NAME_LOOKUP = { table: 'dbo.locations', key: 'location_code', label: 'location_name', match: ['location_code', 'location_name'] };
 
+// The link to the ingredients table that phase 3 added to several
+// tables. server.js fills in "ingredient"; if it's ever missing, the
+// name as typed is used, which then becomes a new ingredient.
+function ingredientLink(typedNameField) {
+    return { csv: 'ingredient', column: 'ingredient_name', type: 'NVARCHAR(200)', kind: 'text', required: true, orUse: typedNameField };
+}
+
 function inventoryTable(location) {
     return {
         table: 'dbo.inventory',
         where: { location_code: location },
         key: ['name', 'unit'],
         mergeQuantities: true,
+        addMissingIngredients: 'ingredient',
         orderBy: 'name',
         columns: [
             { csv: 'name', type: 'NVARCHAR(200)', kind: 'text', required: true },
             { csv: 'quantity', type: 'DECIMAL(12,3)', kind: 'number', required: true },
             { csv: 'unit', type: 'NVARCHAR(20)', kind: 'text', required: true },
             { csv: 'track', type: 'NVARCHAR(10)', kind: 'text' },
-            { csv: 'low', type: 'BIT', kind: 'yesno', required: true }
+            { csv: 'low', type: 'BIT', kind: 'yesno', required: true },
+            ingredientLink('name')
         ]
     };
 }
@@ -156,10 +177,14 @@ const TABLES = {
         key: ['recipe_id', 'ingredient_name', 'unit'],
         mergeQuantities: true,
         recipeChild: true,
+        addMissingIngredients: 'ingredient',
         orderBy: 'recipe_id, sort_order',
         columns: [
             { csv: 'recipe_id', type: 'NVARCHAR(20)', kind: 'text', required: true },
-            { csv: 'ingredient_name', type: 'NVARCHAR(200)', kind: 'text', required: true },
+            // (UPDATE, phase 3: the name as the recipe words it is the
+            // "name" column now; ingredient_name is the link below.)
+            { csv: 'ingredient_name', column: 'name', type: 'NVARCHAR(200)', kind: 'text', required: true },
+            ingredientLink('ingredient_name'),
             { csv: 'unit', type: 'NVARCHAR(20)', kind: 'text', required: true },
             { csv: 'quantity', type: 'DECIMAL(12,3)', kind: 'number' },
             { csv: 'sort_order', type: 'INT', kind: 'number', position: true }
@@ -178,13 +203,31 @@ const TABLES = {
         ]
     },
 
+    // (UPDATE, phase 3: every alias now - the built-in ones too - each
+    // pointing at an ingredient. canonical_name is the ingredient_name
+    // column, and source says built_in or yours.)
     'ingredient_aliases.csv': {
         table: 'dbo.ingredient_aliases',
         key: ['alias'],
+        addMissingIngredients: 'canonical_name',
         orderBy: 'alias',
         columns: [
             { csv: 'alias', type: 'NVARCHAR(200)', kind: 'text', required: true },
-            { csv: 'canonical_name', type: 'NVARCHAR(200)', kind: 'text', required: true }
+            { csv: 'canonical_name', column: 'ingredient_name', type: 'NVARCHAR(200)', kind: 'text', required: true },
+            { csv: 'source', type: 'NVARCHAR(10)', kind: 'text', required: true }
+        ]
+    },
+
+    // ---- The master list of ingredients (UPDATE, phase 3) ----
+    'ingredients': {
+        table: 'dbo.ingredients',
+        key: ['ingredient_name'],
+        orderBy: 'ingredient_name',
+        columns: [
+            { csv: 'ingredient_name', type: 'NVARCHAR(200)', kind: 'text', required: true },
+            { csv: 'tin_quantity', type: 'DECIMAL(12,3)', kind: 'number' },
+            { csv: 'tin_unit', type: 'NVARCHAR(20)', kind: 'text' },
+            { csv: 'source', type: 'NVARCHAR(10)', kind: 'text', required: true }
         ]
     },
 
@@ -227,21 +270,25 @@ const TABLES = {
     'stock_minimums.csv': {
         table: 'dbo.stock_minimums',
         key: ['name', 'unit'],
+        addMissingIngredients: 'ingredient',
         orderBy: 'name',
         columns: [
             { csv: 'name', type: 'NVARCHAR(200)', kind: 'text', required: true },
             { csv: 'minimum', type: 'DECIMAL(12,3)', kind: 'number', required: true },
-            { csv: 'unit', type: 'NVARCHAR(20)', kind: 'text', required: true }
+            { csv: 'unit', type: 'NVARCHAR(20)', kind: 'text', required: true },
+            ingredientLink('name')
         ]
     },
 
     'barcodes.csv': {
         table: 'dbo.barcodes',
         key: ['barcode'],
+        addMissingIngredients: 'ingredient',
         orderBy: 'barcode',
         columns: [
             { csv: 'barcode', type: 'NVARCHAR(50)', kind: 'text', required: true },
             { csv: 'name', column: 'item_name', type: 'NVARCHAR(200)', kind: 'text', required: true },
+            ingredientLink('name'),
             { csv: 'brand', type: 'NVARCHAR(100)', kind: 'text' },
             { csv: 'product_name', type: 'NVARCHAR(300)', kind: 'text' },
             { csv: 'quantity', type: 'DECIMAL(12,3)', kind: 'number' },
@@ -606,7 +653,11 @@ function buildSaveSql(request, save, index) {
     const sent = sentColumns(definition);
     const json = rows.map(row => {
         const out = {};
-        sent.forEach(col => { out[columnName(col)] = toDatabaseValue(row[col.csv], col); });
+        sent.forEach(col => {
+            const value = row[col.csv];
+            const blank = value === null || value === undefined || String(value).trim() === '';
+            out[columnName(col)] = toDatabaseValue(blank && col.orUse ? row[col.orUse] : value, col);
+        });
         return out;
     });
     request.input(rowsParam, sql.NVarChar(sql.MAX), JSON.stringify(json));
@@ -626,6 +677,19 @@ INSERT INTO dbo.stores (store_name, is_active)
 SELECT DISTINCT src.${columnName(storeCol)}, 0 FROM ${unpacked}
 WHERE src.${columnName(storeCol)} IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM dbo.stores AS st WHERE st.store_name = src.${columnName(storeCol)});`);
+    }
+
+    // (UPDATE, phase 3) Any ingredient name not in the ingredients table
+    // yet gets added as one of yours, so the save isn't refused by the
+    // foreign key.
+    if (definition.addMissingIngredients) {
+        const ingredientCol = definition.columns.find(col => col.csv === definition.addMissingIngredients);
+        const name = columnName(ingredientCol);
+        statements.push(`
+INSERT INTO dbo.ingredients (ingredient_name, source)
+SELECT DISTINCT src.${name}, 'yours' FROM ${unpacked}
+WHERE src.${name} IS NOT NULL AND src.${name} <> ''
+  AND NOT EXISTS (SELECT 1 FROM dbo.ingredients AS ing WHERE ing.ingredient_name = src.${name});`);
     }
 
     // The inner SELECT: every stored column, with lookups resolved,

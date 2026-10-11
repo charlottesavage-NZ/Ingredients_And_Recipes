@@ -1,13 +1,14 @@
 -- =============================================================
 -- CHECK THE DATA - run in SSMS on the pantry database, e.g. after
 -- database/phase2-upgrade.sql or the CSV migration, to see the data
--- is all there. (Updated for the phase 2 tables.)
+-- is all there. (Updated for the phase 3 tables.)
 -- =============================================================
 
 -- Row count per table
 SELECT 'people' AS table_name, COUNT(*) AS row_count FROM dbo.people
 UNION ALL SELECT 'stores', COUNT(*) FROM dbo.stores
 UNION ALL SELECT 'locations', COUNT(*) FROM dbo.locations
+UNION ALL SELECT 'ingredients', COUNT(*) FROM dbo.ingredients
 UNION ALL SELECT 'inventory', COUNT(*) FROM dbo.inventory
 UNION ALL SELECT 'recipes', COUNT(*) FROM dbo.recipes
 UNION ALL SELECT 'recipe_ingredients', COUNT(*) FROM dbo.recipe_ingredients
@@ -42,11 +43,25 @@ JOIN dbo.recipes r ON r.recipe_id = v.recipe_id
 JOIN dbo.people p ON p.person_id = v.person_id
 ORDER BY r.name, p.name;
 
--- The full stock list
-SELECT l.location_name, i.name, i.quantity, i.unit, i.track, i.low
+-- The full stock list, with the ingredient each item counts as
+SELECT l.location_name, i.name, i.ingredient_name, i.quantity, i.unit, i.track, i.low
 FROM dbo.inventory i
 JOIN dbo.locations l ON l.location_code = i.location_code
 ORDER BY l.sort_order, i.name;
+
+-- Names you've used that link to a DIFFERENT ingredient name - worth a
+-- quick look that each one is what you'd expect
+SELECT 'stock' AS used_in, name, ingredient_name FROM dbo.inventory WHERE name <> ingredient_name
+UNION SELECT 'recipe', name, ingredient_name FROM dbo.recipe_ingredients WHERE name <> ingredient_name
+UNION SELECT 'minimum', name, ingredient_name FROM dbo.stock_minimums WHERE name <> ingredient_name
+UNION SELECT 'barcode', item_name, ingredient_name FROM dbo.barcodes WHERE item_name <> ingredient_name
+ORDER BY ingredient_name, name;
+
+-- Ingredients you've added yourself (anything not in the built-in list)
+SELECT ingredient_name, tin_quantity, tin_unit
+FROM dbo.ingredients
+WHERE source = 'yours'
+ORDER BY ingredient_name;
 
 -- The most recent activity, in NZ time
 SELECT TOP 20 logged_at AT TIME ZONE 'New Zealand Standard Time' AS nz_time, line_no,

@@ -1,4 +1,11 @@
 // -------------------------------------------------------------
+// UPDATE, phase 3: the website no longer reads this file. Everything
+// in it - the aliases, the extra names and the tin sizes - was copied
+// into the database's ingredients and ingredient_aliases tables by
+// database/ingredients-upgrade.sql (built-in rows are marked
+// source = 'built_in'). Add or change them in SSMS now. This file is
+// kept as the original source of that built-in list.
+// -------------------------------------------------------------
 // The big built-in ingredient list, used for two things:
 //
 // 1. SUGGESTIONS - every name in here (on both sides of the alias

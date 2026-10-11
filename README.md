@@ -56,9 +56,10 @@ This is intended to help with a couple of issues:
 ## How it's built
 
 - **No framework.** Plain HTML, CSS and JavaScript pages, and one Node.js server (`server.js`) using Node's built-in `http` module.
-- **Data is stored in an Azure SQL Database** (Microsoft SQL Server in the cloud, on the free offer). There are 14 tables: people, stores and storage locations, plus inventory, recipes, recipe ingredients, votes, aliases, prices, the activity log, stock minimums, barcodes, the meal plan and the watch list. See `database/create-tables.sql`, and [`docs/database-design.md`](docs/database-design.md) for the crow's foot and UML diagrams.
+- **Data is stored in an Azure SQL Database** (Microsoft SQL Server in the cloud, on the free offer). There are 15 tables: people, stores, storage locations and a master list of ingredients, plus inventory, recipes, recipe ingredients, votes, aliases, prices, the activity log, stock minimums, barcodes, the meal plan and the watch list. See `database/create-tables.sql`, and [`docs/database-design.md`](docs/database-design.md) for the crow's foot and UML diagrams.
   - Only `people` has a number id. Every other table is keyed by its real-world identity, with composite keys where one column isn't enough (stock is keyed on storage area + name + unit, prices on store + product + time).
   - `server.js` still works with names ("Todd", "Woolworths Ferrymead"). `database.js` swaps them for keys inside the SQL.
+  - Stock, recipe ingredients, minimums and barcodes keep the name as typed, plus a link to the ingredient it counts as ("Diced Tomatoes" -> "Tinned Tomatoes"). The built-in aliases, tin sizes and suggestion names live in the `ingredients` and `ingredient_aliases` tables (`ingredient-data.js` is kept only as their original source).
   - Each save is one T-SQL batch in a single transaction. The rows are sent as JSON and unpacked with `OPENJSON`, so a save is all-or-nothing.
   - Recipes save with `MERGE`, and their ingredients, votes and meal-plan entries are linked by foreign keys with `ON DELETE CASCADE`.
   - Prices and the activity log are insert-only, so the full history is kept line by line.
@@ -76,11 +77,13 @@ This is intended to help with a couple of issues:
 | `csv.js` | Reads CSV files (shared by `server.js` and the migration script) |
 | `database/create-tables.sql` | Creates all the tables in a new, empty database, with the starting people, stores and storage areas |
 | `database/phase2-upgrade.sql` | One-off upgrade of the live database from the phase 1 tables to phase 2 |
+| `database/ingredients-upgrade.sql` | One-off upgrade from phase 2 to phase 3: the ingredients table, built-in aliases and tin sizes moved in, every name linked |
+| `database/seed-ingredients.sql` | The built-in ingredients and aliases, for a new database (run after `create-tables.sql`) |
 | `database/migrate-csv-to-database.js` | Copies every CSV file into a database (now for filling a test database from the archived CSVs) |
 | `database/check-migration.sql` | Queries to check the data is all there |
 | `docs/database-design.md` | The database design, with crow's foot and UML diagrams |
 | `database-config.example.js` | What the real (gitignored) `database-config.js` looks like |
-| `ingredient-data.js` | Built-in ingredient aliases (US to NZ names etc.) and tin sizes |
+| `ingredient-data.js` | The original built-in aliases and tin sizes - now in the database, so the site no longer reads this |
 | `index.html` / `script.js` | Inventory page |
 | `recipes.html` / `recipes.js` | Recipes page |
 | `planner.html` / `planner.js` | Meal Planner page |
@@ -114,7 +117,7 @@ module.exports = {
 **2. `database-config.js`** says which database to use (copy `database-config.example.js`). Don't point your own computer at the live `pantry` database, or your testing changes the real household data. Instead:
 
 1. In the Azure portal, create a second free database, e.g. `pantry_dev`, on the same server (the free offer allows several).
-2. In SSMS (admin login, `pantry_dev`), run `database/create-tables.sql`, and create a `pantry_app` user there too.
+2. In SSMS (admin login, `pantry_dev`), run `database/create-tables.sql`, then `database/seed-ingredients.sql`, and create a `pantry_app` user there too.
 3. Optionally fill it from CSV copies with `node database/migrate-csv-to-database.js`.
 4. Set `database: 'pantry_dev'` in your local `database-config.js`. Your computer's IP address has to be allowed in the server's firewall.
 
@@ -163,5 +166,18 @@ The website code and the tables have to change together, so the site is stopped 
 2. On the garage: `systemctl stop ingredients-recipes-update.timer && systemctl stop ingredients-recipes`.
 3. In SSMS (admin login, `pantry` database), open and run `database/phase2-upgrade.sql`. It runs as one transaction: if anything fails, nothing changes. It finishes by listing every table's row count.
 4. Push the phase 2 code from your PC, then run update-pantry on the garage (this starts the site again on the new code).
+5. `systemctl start ingredients-recipes-update.timer`.
+6. In SSMS, run `database/check-migration.sql`, and try the site.
+
+(Done on 12 October 2026.)
+
+### Upgrading the live database to phase 3: the ingredients table (one-off)
+
+Same pattern as phase 2 - the tables and the code change together.
+
+1. In SSMS, take a backup copy: right-click `pantry` -> **Tasks -> Export Data-tier Application**.
+2. On the garage: `systemctl stop ingredients-recipes-update.timer && systemctl stop ingredients-recipes`.
+3. In SSMS, right-click **pantry -> New Query** (the yellow bar must say `pantry`), open `database/ingredients-upgrade.sql`, paste it into that window and run it. It's one transaction - if anything fails, nothing changes. It ends with the row counts and a list of every name you use and the ingredient it was linked to.
+4. Push the phase 3 code from your PC, then run update-pantry on the garage.
 5. `systemctl start ingredients-recipes-update.timer`.
 6. In SSMS, run `database/check-migration.sql`, and try the site.
