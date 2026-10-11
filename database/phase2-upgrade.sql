@@ -28,7 +28,16 @@ SET NOCOUNT ON;
 
 IF OBJECT_ID('dbo.people', 'U') IS NOT NULL
 BEGIN
-    THROW 50000, 'This database already has the phase 2 tables (dbo.people exists) - nothing was changed.', 1;
+    RAISERROR('This database already has the phase 2 tables (dbo.people exists) - nothing was changed.', 16, 1);
+    RETURN;
+END;
+
+-- Stops straight away if this window is on the wrong database
+-- (e.g. master), before anything is created.
+IF OBJECT_ID('dbo.recipes', 'U') IS NULL OR OBJECT_ID('dbo.inventory', 'U') IS NULL
+BEGIN
+    RAISERROR('The phase 1 tables were not found - check the database dropdown says pantry. Nothing was changed.', 16, 1);
+    RETURN;
 END;
 
 BEGIN TRANSACTION;
