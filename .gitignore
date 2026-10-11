@@ -1,4 +1,12 @@
-credentials.js
+# (The leading / means "only the one in the project folder" - without
+# it, files with the same name inside node_modules, which the database
+# driver needs, would be left out of git too.)
+/credentials.js
+
+# Azure SQL connection details (server, login, password) - only on the
+# garage. Creating it switches the site from the CSV files to the
+# database - see database.js and database-config.example.js.
+/database-config.js
 
 # Live household data - the garage server owns these, so a pull
 # must never overwrite them with the copies from this computer
