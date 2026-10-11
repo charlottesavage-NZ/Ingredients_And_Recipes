@@ -1,40 +1,12 @@
 -- =============================================================
 -- CREATE TABLES - the Azure SQL Database version of every CSV file
 -- =============================================================
--- Run this ONCE in SSMS, logged in with your ADMIN login (not
--- pantry_app - that one is only allowed to read and change data,
--- not create tables):
---   1. In Object Explorer, right-click the "pantry" database
---      -> New Query
---   2. Check the database dropdown on the toolbar says "pantry"
---      (NOT master) - in Azure SQL each query window only works on
---      the database it was opened on, and USE can't switch it
---   3. Paste this whole file in and press F5
---
--- It's safe to run again: every table is wrapped in
--- "IF OBJECT_ID(...) IS NULL", which means "only create it if it
--- doesn't exist yet". So running it twice never wipes any data.
---
--- Each table mirrors one CSV file, with the same column names
--- wherever T-SQL allows it, so server.js changes as little as
--- possible. Notes on the T-SQL used:
---   NVARCHAR(n)        text up to n characters (the N means it can
---                      hold any language, e.g. accents and emoji)
---   NVARCHAR(MAX)      text with no practical limit (recipe steps)
---   DECIMAL(12,3)      an exact number with up to 3 decimal places -
---                      unlike FLOAT, 0.1 + 0.2 really is 0.3
---   BIGINT IDENTITY(1,1)  a number the database fills in itself,
---                      counting up 1, 2, 3... for each new row
---   BIT                yes/no, stored as 1/0
---   DATETIMEOFFSET     a date AND time that remembers its time zone
---   REFERENCES ... ON DELETE CASCADE
---                      "this row belongs to that recipe" - delete
---                      the recipe and these rows go with it
---
--- Text comparisons in Azure SQL ignore capitals by default (the
--- database's "collation" is case-insensitive), so "Tinned Tomatoes"
--- and "tinned tomatoes" count as the same name everywhere below -
--- the same way server.js already compares names.
+-- Run once in SSMS with the ADMIN login, on the pantry database
+-- (not master). Safe to re-run - each table is only created if it
+-- doesn't exist yet. Column names match the CSV headers wherever
+-- possible so server.js changes as little as possible.
+-- The default collation is case-insensitive, matching the way
+-- server.js already compares names.
 -- =============================================================
 
 
@@ -48,8 +20,6 @@ BEGIN
     CREATE TABLE dbo.inventory (
         id        BIGINT IDENTITY(1,1) PRIMARY KEY,
 
-        -- Which storage area. The CHECK stops anything else (like a
-        -- typo) ever being saved in here.
         location  NVARCHAR(10)  NOT NULL
                   CHECK (location IN ('pantry', 'fridge', 'freezer', 'chest')),
 
@@ -57,20 +27,14 @@ BEGIN
         quantity  DECIMAL(12,3) NOT NULL,
         unit      NVARCHAR(20)  NOT NULL,
 
-        -- The "track" column: 'have' (a have-it item, like sauces),
-        -- 'amount' (a counted item), or NULL if nobody's picked one
-        -- and it's guessed from the name (see isHaveIt in server.js)
+        -- 'have' / 'amount', or NULL = guess from the name (isHaveIt in server.js)
         track     NVARCHAR(10)  NULL
                   CHECK (track IN ('have', 'amount')),
 
-        -- The "low" column: 1 if someone pressed L to mark it as
-        -- running low (the CSV writes this as "yes" or blank)
+        -- 1 = marked as running low ("yes" in the CSV)
         low       BIT           NOT NULL DEFAULT 0,
 
-        -- Same rule as the merge in server.js: one row per item name
-        -- + unit in each storage area, so adding 500 g of rice to the
-        -- pantry tops up the existing rice row instead of adding a
-        -- second one.
+        -- Same rule as the merge in server.js: one row per name + unit per area
         CONSTRAINT inventory_one_row_per_item UNIQUE (location, name, unit)
     );
 END;
@@ -89,8 +53,7 @@ BEGIN
         name         NVARCHAR(200) NOT NULL,
         instructions NVARCHAR(MAX) NOT NULL DEFAULT '',
 
-        -- How many people the amounts are written for. NULL on older
-        -- recipes saved before the servings column existed.
+        -- NULL on recipes saved before servings existed
         servings     INT           NULL
     );
 END;
@@ -159,9 +122,7 @@ BEGIN
     CREATE TABLE dbo.prices (
         id            BIGINT IDENTITY(1,1) PRIMARY KEY,
 
-        -- The tidied-up name used for grouping (home brands become
-        -- "Home Brand", Woolworths pack sizes stripped off the end -
-        -- see savedPriceName in server.js)
+        -- tidied name used for grouping (see savedPriceName in server.js)
         item_name     NVARCHAR(300) NOT NULL,
 
         price         DECIMAL(10,2) NULL,
@@ -170,18 +131,13 @@ BEGIN
         package_size  NVARCHAR(50)  NULL,
         store         NVARCHAR(100) NOT NULL,
 
-        -- When the price was saved. SYSDATETIMEOFFSET() is T-SQL for
-        -- "right now", filled in automatically if no time is given.
         date_checked  DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
 
-        -- The product's name EXACTLY as the supermarket wrote it.
-        -- NULL for rows saved before this column existed.
+        -- exactly as the supermarket wrote it; NULL on older rows
         original_name NVARCHAR(300) NULL
     );
 
-    -- An index is like the index at the back of a book: it lets the
-    -- database jump straight to one product's price history (newest
-    -- first) instead of reading every row to find it.
+    -- one product's history, newest first
     CREATE INDEX prices_by_item ON dbo.prices (item_name, date_checked DESC);
 END;
 
@@ -198,7 +154,7 @@ BEGIN
     CREATE TABLE dbo.activity_log (
         id        BIGINT IDENTITY(1,1) PRIMARY KEY,
         log_date  DATE          NOT NULL,   -- NZ date, e.g. 2026-10-14
-        log_time  TIME(0)       NOT NULL,   -- NZ time, e.g. 18:05 (the (0) means no fractions of a second)
+        log_time  TIME(0)       NOT NULL,   -- NZ time, e.g. 18:05
         person    NVARCHAR(50)  NULL,
         action    NVARCHAR(50)  NOT NULL,
         item      NVARCHAR(200) NULL,
@@ -285,10 +241,7 @@ BEGIN
 END;
 
 
--- -------------------------------------------------------------
--- Finally, list every table so you can see they were all made.
--- You should see 11 rows in the Results tab at the bottom.
--- -------------------------------------------------------------
+-- Should list 11 tables
 SELECT name AS table_name, create_date
 FROM sys.tables
 ORDER BY name;
