@@ -17,6 +17,10 @@
 //
 // Note: anything you add while testing locally gets saved into the
 // CSV files in THIS folder - see the README before committing them.
+// (UPDATE: the CSV files are retired. server.js now needs a
+// database-config.js in this folder, and saves into whichever database
+// that points at - point it at a separate pantry_dev database for
+// testing, NOT the live pantry one. See the README.)
 // -------------------------------------------------------------
 
 const http = require('http');

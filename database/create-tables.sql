@@ -1,247 +1,301 @@
 -- =============================================================
--- CREATE TABLES - the Azure SQL Database version of every CSV file
+-- CREATE TABLES - the full pantry database (phase 2 design)
 -- =============================================================
--- Run once in SSMS with the ADMIN login, on the pantry database
+-- For building a NEW, empty database (e.g. a pantry_dev copy for
+-- testing). The live database was upgraded from the phase 1 tables
+-- with database/phase2-upgrade.sql instead.
+--
+-- Run once in SSMS with the ADMIN login, on the target database
 -- (not master). Safe to re-run - each table is only created if it
--- doesn't exist yet. Column names match the CSV headers wherever
--- possible so server.js changes as little as possible.
--- The default collation is case-insensitive, matching the way
--- server.js already compares names.
+-- doesn't exist yet, and the starting rows are only added if missing.
+--
+-- Keys: a number id for people only. Everything else is keyed by
+-- its real-world identity, with composite keys where one column
+-- isn't enough. The default collation is case-insensitive, matching
+-- the way server.js compares names.
 -- =============================================================
 
 
 -- -------------------------------------------------------------
--- INVENTORY - pantry.csv, fridge.csv, freezer.csv and chest.csv
--- all in ONE table, with a location column saying which storage
--- area each item is in.
+-- PEOPLE - everyone who can log in and vote. Every other table
+-- stores person_id, never the name.
+-- -------------------------------------------------------------
+IF OBJECT_ID('dbo.people', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.people (
+        person_id INT IDENTITY(1,1) CONSTRAINT PK_people PRIMARY KEY,
+        name      NVARCHAR(50) NOT NULL CONSTRAINT UQ_people_name UNIQUE
+    );
+END;
+
+
+-- -------------------------------------------------------------
+-- STORES - every supermarket branch the price checker can search.
+-- store_code is the cookie value / store ID the scraper uses to pick
+-- that branch (blank for Trents). is_main_store = in the "Our stores"
+-- search; is_preferred = listed first; is_active = still offered.
+-- -------------------------------------------------------------
+IF OBJECT_ID('dbo.stores', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.stores (
+        store_name    NVARCHAR(100) CONSTRAINT PK_stores PRIMARY KEY,
+        chain         NVARCHAR(50)  NULL,
+        suburb        NVARCHAR(50)  NULL,
+        store_code    NVARCHAR(200) NULL,
+        is_main_store BIT NOT NULL CONSTRAINT DF_stores_main DEFAULT 0,
+        is_preferred  BIT NOT NULL CONSTRAINT DF_stores_preferred DEFAULT 0,
+        is_active     BIT NOT NULL CONSTRAINT DF_stores_active DEFAULT 1
+    );
+END;
+
+
+-- -------------------------------------------------------------
+-- LOCATIONS - the storage areas in the house.
+-- -------------------------------------------------------------
+IF OBJECT_ID('dbo.locations', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.locations (
+        location_code NVARCHAR(10) CONSTRAINT PK_locations PRIMARY KEY,
+        location_name NVARCHAR(50) NOT NULL,
+        storage_type  NVARCHAR(10) NOT NULL
+                      CONSTRAINT CK_locations_type CHECK (storage_type IN ('cupboard', 'chilled', 'frozen')),
+        sort_order    INT NOT NULL
+    );
+END;
+
+
+-- -------------------------------------------------------------
+-- INVENTORY - what's in the house: one row per thing, per storage
+-- area, per unit (quantities are kept in g / ml / each).
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.inventory', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.inventory (
-        id        BIGINT IDENTITY(1,1) PRIMARY KEY,
-
-        location  NVARCHAR(10)  NOT NULL
-                  CHECK (location IN ('pantry', 'fridge', 'freezer', 'chest')),
-
-        name      NVARCHAR(200) NOT NULL,
-        quantity  DECIMAL(12,3) NOT NULL,
-        unit      NVARCHAR(20)  NOT NULL,
-
-        -- 'have' / 'amount', or NULL = guess from the name (isHaveIt in server.js)
-        track     NVARCHAR(10)  NULL
-                  CHECK (track IN ('have', 'amount')),
-
-        -- 1 = marked as running low ("yes" in the CSV)
-        low       BIT           NOT NULL DEFAULT 0,
-
-        -- Same rule as the merge in server.js: one row per name + unit per area
-        CONSTRAINT inventory_one_row_per_item UNIQUE (location, name, unit)
+        location_code NVARCHAR(10)  NOT NULL
+                      CONSTRAINT FK_inventory_location REFERENCES dbo.locations(location_code) ON UPDATE CASCADE,
+        name          NVARCHAR(200) NOT NULL,
+        unit          NVARCHAR(20)  NOT NULL,
+        quantity      DECIMAL(12,3) NOT NULL,
+        track         NVARCHAR(10)  NULL CONSTRAINT CK_inventory_track CHECK (track IN ('have', 'amount')),   -- NULL = guess from the name
+        low           BIT NOT NULL CONSTRAINT DF_inventory_low DEFAULT 0,                                   -- marked running low
+        CONSTRAINT PK_inventory PRIMARY KEY (location_code, name, unit)
     );
 END;
 
 
 -- -------------------------------------------------------------
--- RECIPES - recipes.csv
--- The ids stay exactly as they are now (e.g. "1786093115133", made
--- from Date.now() when the recipe was added), so nothing the
--- browser already knows about changes.
+-- RECIPES - recipe_id is the exact time (in milliseconds) the
+-- recipe was first saved, e.g. "1786093115133".
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.recipes', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.recipes (
-        id           NVARCHAR(20)  PRIMARY KEY,
+        recipe_id    NVARCHAR(20)  CONSTRAINT PK_recipes PRIMARY KEY,
         name         NVARCHAR(200) NOT NULL,
-        instructions NVARCHAR(MAX) NOT NULL DEFAULT '',
-
-        -- NULL on recipes saved before servings existed
-        servings     INT           NULL
+        instructions NVARCHAR(MAX) NOT NULL CONSTRAINT DF_recipes_instructions DEFAULT '',
+        servings     INT NULL      -- NULL = the default of 2
     );
 END;
 
 
 -- -------------------------------------------------------------
--- RECIPE INGREDIENTS - recipe_ingredients.csv
--- Many rows per recipe. Deleting a recipe deletes these too.
+-- RECIPE INGREDIENTS - each ingredient in a recipe. sort_order keeps
+-- them in the order the recipe lists them.
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.recipe_ingredients', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.recipe_ingredients (
-        id              BIGINT IDENTITY(1,1) PRIMARY KEY,
         recipe_id       NVARCHAR(20)  NOT NULL
-                        REFERENCES dbo.recipes(id) ON DELETE CASCADE,
+                        CONSTRAINT FK_recipe_ingredients_recipe REFERENCES dbo.recipes(recipe_id) ON DELETE CASCADE,
         ingredient_name NVARCHAR(200) NOT NULL,
+        unit            NVARCHAR(20)  NOT NULL CONSTRAINT DF_recipe_ingredients_unit DEFAULT '',
         quantity        DECIMAL(12,3) NULL,
-        unit            NVARCHAR(20)  NULL
+        sort_order      INT NOT NULL,
+        CONSTRAINT PK_recipe_ingredients PRIMARY KEY (recipe_id, ingredient_name, unit)
     );
 END;
 
 
 -- -------------------------------------------------------------
--- RECIPE VOTES - recipe_votes.csv
--- The PRIMARY KEY on (recipe_id, person) means each person can only
--- have ONE vote per recipe - voting again changes it, same as now.
+-- RECIPE VOTES - one like/dislike per person per recipe.
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.recipe_votes', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.recipe_votes (
         recipe_id NVARCHAR(20) NOT NULL
-                  REFERENCES dbo.recipes(id) ON DELETE CASCADE,
-        person    NVARCHAR(50) NOT NULL,
+                  CONSTRAINT FK_recipe_votes_recipe REFERENCES dbo.recipes(recipe_id) ON DELETE CASCADE,
+        person_id INT NOT NULL
+                  CONSTRAINT FK_recipe_votes_person REFERENCES dbo.people(person_id),
         vote      NVARCHAR(10) NOT NULL,
-        PRIMARY KEY (recipe_id, person)
+        CONSTRAINT PK_recipe_votes PRIMARY KEY (recipe_id, person_id)
     );
 END;
 
 
 -- -------------------------------------------------------------
--- INGREDIENT ALIASES - ingredient_aliases.csv
--- Only YOUR aliases. The big built-in list stays in
--- ingredient-data.js, because it's part of the code, not data.
+-- MEAL PLAN - the week's plan: each recipe once per day, with how
+-- many people it's for.
+-- -------------------------------------------------------------
+IF OBJECT_ID('dbo.meal_plan', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.meal_plan (
+        day          NVARCHAR(10) NOT NULL,   -- monday to sunday
+        recipe_id    NVARCHAR(20) NOT NULL
+                     CONSTRAINT FK_meal_plan_recipe REFERENCES dbo.recipes(recipe_id) ON DELETE CASCADE,
+        people_count INT NULL,
+        CONSTRAINT PK_meal_plan PRIMARY KEY (day, recipe_id)
+    );
+END;
+
+
+-- -------------------------------------------------------------
+-- INGREDIENT ALIASES - your own alternative names (the built-in
+-- list stays in ingredient-data.js).
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.ingredient_aliases', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.ingredient_aliases (
-        alias          NVARCHAR(200) PRIMARY KEY,
+        alias          NVARCHAR(200) CONSTRAINT PK_ingredient_aliases PRIMARY KEY,
         canonical_name NVARCHAR(200) NOT NULL
     );
 END;
 
 
 -- -------------------------------------------------------------
--- PRICES - prices.csv
--- Pure history: one row per saved price, and rows are never changed
--- or deleted, so you can see every price over time line by line.
---
--- The id is now numbered by the database (1, 2, 3...) instead of
--- Date.now() - Excel had already mangled a lot of the old ids into
--- things like "1.78597E+12", and date_checked holds the exact time
--- anyway.
+-- PRICES - every saved price, never changed or deleted, so the full
+-- history is kept line by line.
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.prices', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.prices (
-        id            BIGINT IDENTITY(1,1) PRIMARY KEY,
-
-        -- tidied name used for grouping (see savedPriceName in server.js)
-        item_name     NVARCHAR(300) NOT NULL,
-
+        store_name    NVARCHAR(100) NOT NULL
+                      CONSTRAINT FK_prices_store REFERENCES dbo.stores(store_name) ON UPDATE CASCADE,
+        item_name     NVARCHAR(300) NOT NULL,   -- tidied name used for grouping (savedPriceName in server.js)
+        date_checked  DATETIMEOFFSET(3) NOT NULL,
         price         DECIMAL(10,2) NULL,
         cup_price     DECIMAL(10,2) NULL,
         cup_measure   NVARCHAR(50)  NULL,
         package_size  NVARCHAR(50)  NULL,
-        store         NVARCHAR(100) NOT NULL,
-
-        date_checked  DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
-
-        -- exactly as the supermarket wrote it; NULL on older rows
-        original_name NVARCHAR(300) NULL
+        original_name NVARCHAR(300) NULL,       -- exactly as the supermarket wrote it
+        CONSTRAINT PK_prices PRIMARY KEY (store_name, item_name, date_checked)
     );
-
-    -- one product's history, newest first
-    CREATE INDEX prices_by_item ON dbo.prices (item_name, date_checked DESC);
 END;
 
 
 -- -------------------------------------------------------------
--- ACTIVITY LOG - activity_log.csv
--- Who added/used/changed what, and when. Like prices, rows are only
--- ever added, never changed. The CSV calls the first two columns
--- "date" and "time" - those are T-SQL type names, so they're
--- log_date and log_time in here to avoid confusion.
+-- ACTIVITY LOG - who changed what, and when. logged_at is the exact
+-- time of the change; line_no numbers the rows one change wrote.
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.activity_log', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.activity_log (
-        id        BIGINT IDENTITY(1,1) PRIMARY KEY,
-        log_date  DATE          NOT NULL,   -- NZ date, e.g. 2026-10-14
-        log_time  TIME(0)       NOT NULL,   -- NZ time, e.g. 18:05
-        person    NVARCHAR(50)  NULL,
-        action    NVARCHAR(50)  NOT NULL,
-        item      NVARCHAR(200) NULL,
-        quantity  DECIMAL(12,3) NULL,
-        unit      NVARCHAR(20)  NULL,
-        location  NVARCHAR(50)  NULL,
-        details   NVARCHAR(MAX) NULL
+        logged_at     DATETIMEOFFSET(7) NOT NULL,
+        line_no       INT NOT NULL,
+        person_id     INT NULL
+                      CONSTRAINT FK_activity_log_person REFERENCES dbo.people(person_id),
+        action        NVARCHAR(50)  NOT NULL,
+        item          NVARCHAR(200) NULL,
+        quantity      DECIMAL(12,3) NULL,
+        unit          NVARCHAR(20)  NULL,
+        location_code NVARCHAR(10)  NULL
+                      CONSTRAINT FK_activity_log_location REFERENCES dbo.locations(location_code) ON UPDATE CASCADE,
+        details       NVARCHAR(MAX) NULL,
+        CONSTRAINT PK_activity_log PRIMARY KEY (logged_at, line_no)
     );
 END;
 
 
 -- -------------------------------------------------------------
--- STOCK MINIMUMS - stock_minimums.csv
--- "Always want 2 tins of tomatoes" - only the items you've chosen
--- to set a minimum for. Stored in the same base unit as the stock
--- (g / ml / each), e.g. 2 tins of tomatoes is saved as 800 g.
+-- STOCK MINIMUMS - "always want 2 tins of tomatoes", in the same
+-- base unit as the stock (g / ml / each).
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.stock_minimums', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.stock_minimums (
         name    NVARCHAR(200) NOT NULL,
-        minimum DECIMAL(12,3) NOT NULL,
         unit    NVARCHAR(20)  NOT NULL,
-        PRIMARY KEY (name, unit)
+        minimum DECIMAL(12,3) NOT NULL,
+        CONSTRAINT PK_stock_minimums PRIMARY KEY (name, unit)
     );
 END;
 
 
 -- -------------------------------------------------------------
--- BARCODES - barcodes.csv
--- Every barcode you've scanned, remembered with the name YOU used
--- for it, so the second scan is instant.
+-- BARCODES - your own barcode database: what each scanned barcode
+-- is, so the next scan fills the form in straight away.
+-- source = 'openfoodfacts' (found there), 'scanned' (you typed the
+-- name after scanning) or 'typed' (added by hand / uploaded).
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.barcodes', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.barcodes (
-        barcode  NVARCHAR(50)  PRIMARY KEY,
-        name     NVARCHAR(200) NOT NULL,
-        quantity DECIMAL(12,3) NULL,
-        unit     NVARCHAR(20)  NULL,
-        location NVARCHAR(10)  NULL
+        barcode            NVARCHAR(50)  CONSTRAINT PK_barcodes PRIMARY KEY,
+        item_name          NVARCHAR(200) NOT NULL,   -- your name for it, e.g. Tinned Tomatoes
+        brand              NVARCHAR(100) NULL,
+        product_name       NVARCHAR(300) NULL,       -- full name on the pack
+        quantity           DECIMAL(12,3) NULL,       -- pack size
+        unit               NVARCHAR(20)  NULL,
+        location_code      NVARCHAR(10)  NULL
+                           CONSTRAINT FK_barcodes_location REFERENCES dbo.locations(location_code) ON UPDATE CASCADE,
+        source             NVARCHAR(20)  NULL,
+        added_by_person_id INT NULL
+                           CONSTRAINT FK_barcodes_person REFERENCES dbo.people(person_id),
+        date_added         DATE NULL
     );
 END;
 
 
 -- -------------------------------------------------------------
--- MEAL PLAN - meal_plan.csv
--- One row per recipe planned for the week, with the day and how
--- many people it's for. Removing a recipe removes it from the plan.
--- -------------------------------------------------------------
-IF OBJECT_ID('dbo.meal_plan', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.meal_plan (
-        id        BIGINT IDENTITY(1,1) PRIMARY KEY,
-        day       NVARCHAR(10) NOT NULL,   -- e.g. monday
-        recipe_id NVARCHAR(20) NOT NULL
-                  REFERENCES dbo.recipes(id) ON DELETE CASCADE,
-        people    INT          NULL
-    );
-END;
-
-
--- -------------------------------------------------------------
--- WATCH LIST - watch_list.csv
--- Products starred on the Price Checker page, which get re-checked
--- every morning and their price saved into dbo.prices.
--- (When the morning check last ran stays in the
--- watch_check_status.json file on the garage, NOT in here - the
--- server looks at it every 15 minutes, and asking the database that
--- often would keep waking it up and use up the free monthly
--- allowance.)
+-- WATCH LIST - products starred on the Price Checker page, re-checked
+-- every morning.
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.watch_list', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.watch_list (
-        id           NVARCHAR(20)  PRIMARY KEY,
-        item_name    NVARCHAR(300) NOT NULL,
-        store        NVARCHAR(100) NOT NULL,
-        package_size NVARCHAR(50)  NULL,
-        search_term  NVARCHAR(300) NULL,
-        added_by     NVARCHAR(50)  NULL,
-        date_added   DATETIMEOFFSET NULL
+        store_name         NVARCHAR(100) NOT NULL
+                           CONSTRAINT FK_watch_list_store REFERENCES dbo.stores(store_name) ON UPDATE CASCADE,
+        item_name          NVARCHAR(300) NOT NULL,
+        package_size       NVARCHAR(50)  NOT NULL CONSTRAINT DF_watch_list_size DEFAULT '',   -- '' if none
+        search_term        NVARCHAR(300) NULL,
+        added_by_person_id INT NULL
+                           CONSTRAINT FK_watch_list_person REFERENCES dbo.people(person_id),
+        date_added         DATE NULL,
+        CONSTRAINT PK_watch_list PRIMARY KEY (store_name, item_name, package_size)
     );
 END;
 
 
--- Should list 11 tables
+-- =============================================================
+-- STARTING ROWS - only added if they're not there yet
+-- =============================================================
+INSERT INTO dbo.people (name)
+SELECT v.name FROM (VALUES ('Charlotte'), ('Todd'), ('Kayleigh')) AS v(name)
+WHERE NOT EXISTS (SELECT 1 FROM dbo.people p WHERE p.name = v.name);
+
+INSERT INTO dbo.locations (location_code, location_name, storage_type, sort_order)
+SELECT v.* FROM (VALUES
+    ('pantry',  'Pantry',           'cupboard', 1),
+    ('fridge',  'Fridge',           'chilled',  2),
+    ('freezer', 'Freezer (Inside)', 'frozen',   3),
+    ('chest',   'Chest Freezer',    'frozen',   4)
+) AS v(location_code, location_name, storage_type, sort_order)
+WHERE NOT EXISTS (SELECT 1 FROM dbo.locations l WHERE l.location_code = v.location_code);
+
+INSERT INTO dbo.stores (store_name, chain, suburb, store_code, is_main_store, is_preferred, is_active)
+SELECT v.* FROM (VALUES
+    ('Woolworths Moorhouse',  'Woolworths', 'Moorhouse',  'dm-Pickup,f-9169,a-495,s-10235',       0, 0, 1),
+    ('Woolworths Northlands', 'Woolworths', 'Northlands', 'dm-Pickup,f-9540,a-480,s-38',          0, 0, 1),
+    ('Woolworths Ferrymead',  'Woolworths', 'Ferrymead',  'dm-Pickup,f-9576,a-726,s-10410',       1, 1, 1),
+    ('PAK''nSAVE Moorhouse',  'PAK''nSAVE', 'Moorhouse',  '61dd754e-8525-4b9e-9e08-173389eea8a8', 0, 0, 1),
+    ('PAK''nSAVE Papanui',    'PAK''nSAVE', 'Papanui',    '8cd700ae-d96f-4761-bd7a-805d6b93536d', 0, 0, 1),
+    ('PAK''nSAVE Riccarton',  'PAK''nSAVE', 'Riccarton',  '4a279605-eaa8-470d-bcd4-0a9e3c9ab43b', 0, 0, 1),
+    ('PAK''nSAVE Wainoni',    'PAK''nSAVE', 'Wainoni',    'dbca5e00-f7f9-43ae-91de-031ad16f8a92', 1, 1, 1),
+    ('Trents Wholesale',      'Trents',     NULL,         NULL,                                   1, 1, 1)
+) AS v(store_name, chain, suburb, store_code, is_main_store, is_preferred, is_active)
+WHERE NOT EXISTS (SELECT 1 FROM dbo.stores s WHERE s.store_name = v.store_name);
+
+
+-- Should list 14 tables
 SELECT name AS table_name, create_date
 FROM sys.tables
 ORDER BY name;

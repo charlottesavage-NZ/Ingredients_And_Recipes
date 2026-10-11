@@ -7,17 +7,22 @@
 // recipes.csv") - this file turns each of those into the matching
 // SQL against the tables made by database/create-tables.sql.
 //
-// It's only switched on when the gitignored database-config.js file
-// exists (on the garage, and on your PC only if you choose to make
-// one). Without it, database.enabled is false and server.js carries
-// on using the CSV files exactly as before - so this code can be
-// pushed safely before the database is ready, and deleting the
-// config file is an instant way back to the CSVs.
+// The database settings live in the gitignored database-config.js
+// file. (UPDATE, phase 2: the CSV files are retired, so the site
+// needs that file to run - server.js stops with a clear message if
+// it's missing. database.enabled says whether it was found.)
 //
 // Every row handed back looks EXACTLY like a row from parseCSV():
 // every value is text, a missing value is '' (not null), "running
 // low" is 'yes' or '' - so none of the code in server.js that
 // already works on CSV rows has to change.
+//
+// UPDATE, phase 2: the tables now point at each other by key -
+// person_id for people, store_name for stores, location_code for the
+// storage areas - but server.js still works with names ("Todd",
+// "Woolworths Ferrymead", "Fridge"). This file swaps between the two:
+// reads look the name up from the key, and saves look the key up from
+// the name, both inside the SQL (see "lookup" below).
 //
 // The free Azure SQL Database pauses itself when nobody's using it,
 // and every minute it's awake counts against the free monthly
@@ -47,8 +52,7 @@ if (fs.existsSync(CONFIG_FILE)) {
 
 const enabled = Boolean(config);
 
-// Only load the database driver when it's actually going to be used,
-// so the CSV-only setup doesn't depend on it at all.
+// Only load the database driver when it's actually going to be used.
 const sql = enabled ? require('mssql') : null;
 
 // -------------------------------------------------------------
@@ -56,48 +60,68 @@ const sql = enabled ? require('mssql') : null;
 //
 // Each column says:
 // - csv:      its name in the CSV file / in server.js
-// - column:   its name in the database table (only different for the
-//             activity log's date and time - see create-tables.sql)
+// - column:   its name in the database table, if different
 // - type:     the T-SQL type, used when the rows are unpacked from
 //             JSON in the SQL (see "How saving works" further down)
 // - kind:     how to turn the text value into a database value and
 //             back again: 'text', 'number', 'yesno' ('yes' <-> 1),
-//             'datetime' (full ISO date/time text), 'date' (just
-//             "2026-10-14") or 'time' (just "18:05")
+//             'bool' (true/false), 'datetime' (full ISO date/time
+//             text) or 'date' (just "2026-10-14")
 // - required: the table column is NOT NULL, so a blank becomes ''
 //             (text) or 0 (number) instead of NULL
+// - lookup:   the table stores another table's KEY, but server.js
+//             works with a NAME. e.g. recipe_votes.person_id holds 2,
+//             server.js sees person: "Todd". { table, key, label,
+//             match } = look in table, where any of the match columns
+//             equals the name, and use its key (and on reading, show
+//             its label column)
+// - position: filled in by the database with the row's place in the
+//             list (1, 2, 3...) - e.g. a recipe's ingredient order
+// - now:      filled in by the database with the exact time right now
+// - readSql:  read-only, worked out by this SQL instead of stored
 //
 // And each table says:
 // - where:    extra fixed columns, e.g. pantry.csv is the inventory
-//             table's rows WHERE location = 'pantry'
-// - key:      what makes a row unique (matched ignoring capitals,
-//             same as the database does). Saving a list with two
-//             rows that clash on this would be refused by the
-//             database, so they're combined first - see dedupe().
-// - mergeQuantities: for stock, combining two clashing rows ADDS
-//             their quantities together (500 g + 250 g rice = 750 g
-//             rice) instead of keeping just the last one
+//             table's rows WHERE location_code = 'pantry'
+// - key:      what makes a row unique, by server.js's names (matched
+//             ignoring capitals, same as the database does). Saving a
+//             list with two rows that clash on this would be refused
+//             by the database, so they're combined first - see dedupe().
+// - mergeQuantities: combining two clashing rows ADDS their quantities
+//             together (500 g + 250 g rice = 750 g rice) instead of
+//             keeping just the last one
 // - recipeChild: rows belong to a recipe (recipe_id). Any row whose
 //             recipe no longer exists is quietly left out when
-//             saving, the same as the database's ON DELETE CASCADE
-//             would have removed it.
+//             saving, the same as ON DELETE CASCADE would have done.
 // - mergeSave: save with MERGE (update/insert/delete row by row)
 //             instead of "delete everything, insert the new list".
 //             Needed for recipes: deleting every recipe, even for a
 //             moment inside a transaction, would CASCADE and wipe out
 //             every recipe's ingredients, votes and meal plan entries.
-// - identity: the table numbers its own rows (prices, activity log),
-//             so its id column is read back but never written
-// - orderBy:  the order rows come back in - the same order they'd
-//             have been in the CSV file
+// - addMissingStores: before saving, any store name not in the
+//             stores table yet is added to it (switched off, with no
+//             store code), so a price is never refused over its store
+// - uniqueTime: when adding rows, two that would share the same key
+//             AND the same millisecond get the second one moved on by
+//             1 ms, so neither is refused
+// - deriveId: an id server.js and the pages can use, made from the
+//             row's own key (the watch list has no id column)
+// - orderBy:  the order rows come back in
 // -------------------------------------------------------------
+const PEOPLE_LOOKUP = { table: 'dbo.people', key: 'person_id', label: 'name', match: ['name'] };
+const STORE_LOOKUP = { table: 'dbo.stores', key: 'store_name', label: 'store_name', match: ['store_name'] };
+// The pages send a storage area's code ("fridge"), the activity log
+// sends its friendly name ("Fridge") - either is found.
+const LOCATION_CODE_LOOKUP = { table: 'dbo.locations', key: 'location_code', label: 'location_code', match: ['location_code', 'location_name'] };
+const LOCATION_NAME_LOOKUP = { table: 'dbo.locations', key: 'location_code', label: 'location_name', match: ['location_code', 'location_name'] };
+
 function inventoryTable(location) {
     return {
         table: 'dbo.inventory',
-        where: { location },
+        where: { location_code: location },
         key: ['name', 'unit'],
         mergeQuantities: true,
-        orderBy: 'id',
+        orderBy: 'name',
         columns: [
             { csv: 'name', type: 'NVARCHAR(200)', kind: 'text', required: true },
             { csv: 'quantity', type: 'DECIMAL(12,3)', kind: 'number', required: true },
@@ -118,9 +142,9 @@ const TABLES = {
         table: 'dbo.recipes',
         key: ['id'],
         mergeSave: true,
-        orderBy: 'id',
+        orderBy: 'recipe_id',
         columns: [
-            { csv: 'id', type: 'NVARCHAR(20)', kind: 'text', required: true },
+            { csv: 'id', column: 'recipe_id', type: 'NVARCHAR(20)', kind: 'text', required: true },
             { csv: 'name', type: 'NVARCHAR(200)', kind: 'text', required: true },
             { csv: 'instructions', type: 'NVARCHAR(MAX)', kind: 'text', required: true },
             { csv: 'servings', type: 'INT', kind: 'number' }
@@ -129,13 +153,16 @@ const TABLES = {
 
     'recipe_ingredients.csv': {
         table: 'dbo.recipe_ingredients',
+        key: ['recipe_id', 'ingredient_name', 'unit'],
+        mergeQuantities: true,
         recipeChild: true,
-        orderBy: 'id',
+        orderBy: 'recipe_id, sort_order',
         columns: [
             { csv: 'recipe_id', type: 'NVARCHAR(20)', kind: 'text', required: true },
             { csv: 'ingredient_name', type: 'NVARCHAR(200)', kind: 'text', required: true },
+            { csv: 'unit', type: 'NVARCHAR(20)', kind: 'text', required: true },
             { csv: 'quantity', type: 'DECIMAL(12,3)', kind: 'number' },
-            { csv: 'unit', type: 'NVARCHAR(20)', kind: 'text' }
+            { csv: 'sort_order', type: 'INT', kind: 'number', position: true }
         ]
     },
 
@@ -143,10 +170,10 @@ const TABLES = {
         table: 'dbo.recipe_votes',
         key: ['recipe_id', 'person'],
         recipeChild: true,
-        orderBy: 'recipe_id, person',
+        orderBy: 'recipe_id, person_id',
         columns: [
             { csv: 'recipe_id', type: 'NVARCHAR(20)', kind: 'text', required: true },
-            { csv: 'person', type: 'NVARCHAR(50)', kind: 'text', required: true },
+            { csv: 'person', column: 'person_id', type: 'NVARCHAR(50)', kind: 'text', required: true, lookup: PEOPLE_LOOKUP },
             { csv: 'vote', type: 'NVARCHAR(10)', kind: 'text', required: true }
         ]
     },
@@ -163,33 +190,36 @@ const TABLES = {
 
     'prices.csv': {
         table: 'dbo.prices',
-        identity: true,
-        orderBy: 'id',
+        addMissingStores: 'store',
+        uniqueTime: { key: ['store', 'item_name'], time: 'date_checked' },
+        orderBy: 'date_checked',
         columns: [
+            { csv: 'store', column: 'store_name', type: 'NVARCHAR(100)', kind: 'text', required: true, lookup: STORE_LOOKUP },
             { csv: 'item_name', type: 'NVARCHAR(300)', kind: 'text', required: true },
+            { csv: 'date_checked', type: 'DATETIMEOFFSET(3)', kind: 'datetime', required: true },
             { csv: 'price', type: 'DECIMAL(10,2)', kind: 'number' },
             { csv: 'cup_price', type: 'DECIMAL(10,2)', kind: 'number' },
             { csv: 'cup_measure', type: 'NVARCHAR(50)', kind: 'text' },
             { csv: 'package_size', type: 'NVARCHAR(50)', kind: 'text' },
-            { csv: 'store', type: 'NVARCHAR(100)', kind: 'text', required: true },
-            { csv: 'date_checked', type: 'DATETIMEOFFSET', kind: 'datetime', required: true },
             { csv: 'original_name', type: 'NVARCHAR(300)', kind: 'text' }
         ]
     },
 
     'activity_log.csv': {
         table: 'dbo.activity_log',
-        identity: true,
-        orderBy: 'id',
+        orderBy: 'logged_at, line_no',
         columns: [
-            { csv: 'date', column: 'log_date', type: 'DATE', kind: 'date', required: true },
-            { csv: 'time', column: 'log_time', type: 'TIME(0)', kind: 'time', required: true },
-            { csv: 'person', type: 'NVARCHAR(50)', kind: 'text' },
+            { csv: 'logged_at', type: 'DATETIMEOFFSET(7)', kind: 'datetime', now: true },
+            { csv: 'line_no', type: 'INT', kind: 'number', position: true },
+            // The NZ date and time, worked out from logged_at when read.
+            { csv: 'date', kind: 'text', readSql: "CONVERT(CHAR(10), logged_at AT TIME ZONE 'New Zealand Standard Time', 23)" },
+            { csv: 'time', kind: 'text', readSql: "CONVERT(CHAR(5), CAST(logged_at AT TIME ZONE 'New Zealand Standard Time' AS TIME), 108)" },
+            { csv: 'person', column: 'person_id', type: 'NVARCHAR(50)', kind: 'text', lookup: PEOPLE_LOOKUP },
             { csv: 'action', type: 'NVARCHAR(50)', kind: 'text', required: true },
             { csv: 'item', type: 'NVARCHAR(200)', kind: 'text' },
             { csv: 'quantity', type: 'DECIMAL(12,3)', kind: 'number' },
             { csv: 'unit', type: 'NVARCHAR(20)', kind: 'text' },
-            { csv: 'location', type: 'NVARCHAR(50)', kind: 'text' },
+            { csv: 'location', column: 'location_code', type: 'NVARCHAR(50)', kind: 'text', lookup: LOCATION_NAME_LOOKUP },
             { csv: 'details', type: 'NVARCHAR(MAX)', kind: 'text' }
         ]
     },
@@ -211,39 +241,80 @@ const TABLES = {
         orderBy: 'barcode',
         columns: [
             { csv: 'barcode', type: 'NVARCHAR(50)', kind: 'text', required: true },
-            { csv: 'name', type: 'NVARCHAR(200)', kind: 'text', required: true },
+            { csv: 'name', column: 'item_name', type: 'NVARCHAR(200)', kind: 'text', required: true },
+            { csv: 'brand', type: 'NVARCHAR(100)', kind: 'text' },
+            { csv: 'product_name', type: 'NVARCHAR(300)', kind: 'text' },
             { csv: 'quantity', type: 'DECIMAL(12,3)', kind: 'number' },
             { csv: 'unit', type: 'NVARCHAR(20)', kind: 'text' },
-            { csv: 'location', type: 'NVARCHAR(10)', kind: 'text' }
+            { csv: 'location', column: 'location_code', type: 'NVARCHAR(50)', kind: 'text', lookup: LOCATION_CODE_LOOKUP },
+            { csv: 'source', type: 'NVARCHAR(20)', kind: 'text' },
+            { csv: 'added_by', column: 'added_by_person_id', type: 'NVARCHAR(50)', kind: 'text', lookup: PEOPLE_LOOKUP },
+            { csv: 'date_added', type: 'DATE', kind: 'date' }
         ]
     },
 
     'meal_plan.csv': {
         table: 'dbo.meal_plan',
+        key: ['day', 'recipe_id'],
         recipeChild: true,
-        orderBy: 'id',
+        orderBy: 'day, recipe_id',
         columns: [
             { csv: 'day', type: 'NVARCHAR(10)', kind: 'text', required: true },
             { csv: 'recipe_id', type: 'NVARCHAR(20)', kind: 'text', required: true },
-            { csv: 'people', type: 'INT', kind: 'number' }
+            { csv: 'people', column: 'people_count', type: 'INT', kind: 'number' }
         ]
     },
 
     'watch_list.csv': {
         table: 'dbo.watch_list',
-        key: ['id'],
-        orderBy: 'id',
+        key: ['store', 'item_name', 'package_size'],
+        addMissingStores: 'store',
+        deriveId: row => watchListId(row),
+        orderBy: 'date_added, store_name, item_name',
         columns: [
-            { csv: 'id', type: 'NVARCHAR(20)', kind: 'text', required: true },
+            { csv: 'store', column: 'store_name', type: 'NVARCHAR(100)', kind: 'text', required: true, lookup: STORE_LOOKUP },
             { csv: 'item_name', type: 'NVARCHAR(300)', kind: 'text', required: true },
-            { csv: 'store', type: 'NVARCHAR(100)', kind: 'text', required: true },
-            { csv: 'package_size', type: 'NVARCHAR(50)', kind: 'text' },
+            { csv: 'package_size', type: 'NVARCHAR(50)', kind: 'text', required: true },
             { csv: 'search_term', type: 'NVARCHAR(300)', kind: 'text' },
-            { csv: 'added_by', type: 'NVARCHAR(50)', kind: 'text' },
-            { csv: 'date_added', type: 'DATETIMEOFFSET', kind: 'date' }
+            { csv: 'added_by', column: 'added_by_person_id', type: 'NVARCHAR(50)', kind: 'text', lookup: PEOPLE_LOOKUP },
+            { csv: 'date_added', type: 'DATE', kind: 'date' }
+        ]
+    },
+
+    // ---- Lookup tables server.js reads directly ----
+    'stores': {
+        table: 'dbo.stores',
+        key: ['store_name'],
+        orderBy: 'is_preferred DESC, chain, store_name',
+        columns: [
+            { csv: 'store_name', type: 'NVARCHAR(100)', kind: 'text', required: true },
+            { csv: 'chain', type: 'NVARCHAR(50)', kind: 'text' },
+            { csv: 'suburb', type: 'NVARCHAR(50)', kind: 'text' },
+            { csv: 'store_code', type: 'NVARCHAR(200)', kind: 'text' },
+            { csv: 'is_main_store', type: 'BIT', kind: 'bool', required: true },
+            { csv: 'is_preferred', type: 'BIT', kind: 'bool', required: true },
+            { csv: 'is_active', type: 'BIT', kind: 'bool', required: true }
+        ]
+    },
+
+    'people': {
+        table: 'dbo.people',
+        key: ['name'],
+        orderBy: 'person_id',
+        columns: [
+            { csv: 'person_id', type: 'INT', kind: 'number', readSql: 'person_id' },
+            { csv: 'name', type: 'NVARCHAR(50)', kind: 'text', required: true }
         ]
     }
 };
+
+// The watch list has no id column - its key is store + product +
+// size. This turns that key into one piece of text the pages can use
+// as an id (e.g. for the un-star button). The same key always gives
+// the same id.
+function watchListId(row) {
+    return [row.store, row.item_name, row.package_size || ''].join('|');
+}
 
 function tableFor(file) {
     const definition = TABLES[file];
@@ -253,6 +324,19 @@ function tableFor(file) {
 
 function columnName(col) {
     return col.column || col.csv;
+}
+
+// Columns server.js sends values for (not ones the database numbers
+// itself, and not read-only ones). A "now" column is sent too, so a
+// row that already has its own time (e.g. an old log line loaded by
+// the migration script) keeps it - only a blank one gets "now".
+function sentColumns(definition) {
+    return definition.columns.filter(col => !col.position && !col.readSql);
+}
+
+// Columns that are actually stored in the table.
+function storedColumns(definition) {
+    return definition.columns.filter(col => !col.readSql);
 }
 
 // -------------------------------------------------------------
@@ -268,7 +352,7 @@ function toDatabaseValue(value, col) {
         // Whole-number columns (servings, people) can't take "4.5".
         return col.type === 'INT' ? Math.round(number) : number;
     }
-    if (col.kind === 'yesno') {
+    if (col.kind === 'yesno' || col.kind === 'bool') {
         return text.toLowerCase() === 'yes' || text === '1' || text.toLowerCase() === 'true' ? 1 : 0;
     }
     if (text === '') return col.required ? '' : null;
@@ -276,12 +360,12 @@ function toDatabaseValue(value, col) {
 }
 
 function fromDatabaseValue(value, col) {
+    if (col.kind === 'bool') return Boolean(value);
     if (value === null || value === undefined) return '';
 
     if (col.kind === 'yesno') return value ? 'yes' : '';
     if (value instanceof Date) {
         if (col.kind === 'date') return value.toISOString().slice(0, 10);    // "2026-10-14"
-        if (col.kind === 'time') return value.toISOString().slice(11, 16);   // "18:05"
         return value.toISOString();                                         // "2026-10-14T05:05:00.000Z"
     }
     return String(value);
@@ -296,12 +380,16 @@ function fromDatabaseValue(value, col) {
 // The database ignores capitals and trailing spaces when comparing,
 // so the match here does too.
 // -------------------------------------------------------------
+function keyOf(row, names) {
+    return names.map(name => String(row[name] ?? '').trimEnd().toLowerCase()).join('|');
+}
+
 function dedupe(rows, definition) {
     if (!definition.key) return rows;
 
     const byKey = new Map();
     rows.forEach(row => {
-        const key = definition.key.map(name => String(row[name] ?? '').trimEnd().toLowerCase()).join('|');
+        const key = keyOf(row, definition.key);
         const existing = byKey.get(key);
         if (existing && definition.mergeQuantities) {
             existing.quantity = Number(existing.quantity) + Number(row.quantity);
@@ -311,6 +399,25 @@ function dedupe(rows, definition) {
         }
     });
     return [...byKey.values()];
+}
+
+// For prices: two new rows for the same product and store in the same
+// millisecond would clash on the key, so the second one is moved on
+// by 1 ms. (Only ever happens within one batch, e.g. the morning
+// watch list check saving several prices at once.)
+function spreadTimes(rows, definition) {
+    if (!definition.uniqueTime) return rows;
+    const { key, time } = definition.uniqueTime;
+    const used = new Set();
+    return rows.map(row => {
+        const copy = { ...row };
+        let when = Date.parse(copy[time]);
+        if (Number.isNaN(when)) return copy;
+        while (used.has(keyOf(copy, key) + '|' + when)) when += 1;
+        used.add(keyOf(copy, key) + '|' + when);
+        copy[time] = new Date(when).toISOString();
+        return copy;
+    });
 }
 
 // -------------------------------------------------------------
@@ -408,31 +515,44 @@ async function runBatch(buildRequest) {
     }
 }
 
+// "location_code = @where_0_location_code AND ..." for a table's fixed
+// columns (e.g. the pantry is location_code = 'pantry').
+function whereClause(request, definition, prefix, tableAlias) {
+    return Object.entries(definition.where || {}).map(([name, value]) => {
+        request.input(`${prefix}_${name}`, sql.NVarChar(100), value);
+        return `${tableAlias ? tableAlias + '.' : ''}${name} = @${prefix}_${name}`;
+    });
+}
+
 // -------------------------------------------------------------
 // READING - e.g. readRows('pantry.csv') gives back the pantry's
 // rows, laid out exactly like parseCSV() would have.
 // -------------------------------------------------------------
 async function readRowsAsync(file) {
     const definition = tableFor(file);
-    const columns = definition.columns.map(columnName);
-    if (definition.identity) columns.unshift('id');
 
     const result = await runBatch(request => {
-        const conditions = Object.entries(definition.where || {}).map(([name, value]) => {
-            request.input(`where_${name}`, sql.NVarChar(100), value);
-            return `${name} = @where_${name}`;
+        const selects = definition.columns.map(col => {
+            const name = columnName(col);
+            if (col.readSql) return `${col.readSql} AS [${col.csv}]`;
+            if (col.lookup) {
+                // Show the name, not the key, e.g. person_id 2 -> "Todd".
+                return `(SELECT TOP 1 lk.${col.lookup.label} FROM ${col.lookup.table} AS lk WHERE lk.${col.lookup.key} = t.${name}) AS [${col.csv}]`;
+            }
+            return `t.${name} AS [${col.csv}]`;
         });
-        return `SELECT ${columns.join(', ')} FROM ${definition.table}` +
+        const conditions = whereClause(request, definition, 'where', 't');
+        return `SELECT ${selects.join(', ')} FROM ${definition.table} AS t` +
             (conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '') +
-            ` ORDER BY ${definition.orderBy};`;
+            ` ORDER BY ${definition.orderBy.split(',').map(part => 't.' + part.trim()).join(', ')};`;
     });
 
     return result.recordset.map(record => {
         const row = {};
-        if (definition.identity) row.id = String(record.id);
         definition.columns.forEach(col => {
-            row[col.csv] = fromDatabaseValue(record[columnName(col)], col);
+            row[col.csv] = fromDatabaseValue(record[col.csv], col);
         });
+        if (definition.deriveId) row.id = definition.deriveId(row);
         return row;
     });
 }
@@ -453,9 +573,15 @@ function readRows(file, callback) {
 // the whole list is sent as ONE JSON text parameter, and OPENJSON
 // unpacks it into rows inside the database:
 //
-//   INSERT INTO dbo.inventory (location, name, quantity, unit, track, low)
-//   SELECT @where_0_location, name, quantity, unit, track, low
-//   FROM OPENJSON(@rows_0) WITH (name NVARCHAR(200), quantity DECIMAL(12,3), ...);
+//   INSERT INTO dbo.inventory (location_code, name, quantity, unit, track, low)
+//   SELECT @where_0_location_code, s.name, s.quantity, ...
+//   FROM (SELECT src.name, src.quantity, ...
+//         FROM OPENJSON(@rows_0) AS j
+//         CROSS APPLY OPENJSON(j.[value]) WITH (name NVARCHAR(200), ...) AS src) AS s;
+//
+// (The outer OPENJSON gives each row's place in the list as j.[key] -
+// 0, 1, 2... - which fills in "position" columns like sort_order.
+// Lookup columns are swapped from name to key in that inner SELECT.)
 //
 // Several saves can go in one batch (e.g. a recipe AND its
 // ingredients), all inside one transaction - with XACT_ABORT ON, if
@@ -472,71 +598,103 @@ function buildSaveSql(request, save, index) {
     const definition = tableFor(save.file);
     const rowsParam = `rows_${index}`;
     const mode = save.mode || 'replace';
+    const statements = [];
 
     // The rows as JSON, using the database's column names.
-    const rows = (mode === 'replace' ? dedupe(save.rows, definition) : save.rows).map(row => {
+    let rows = mode === 'replace' ? dedupe(save.rows, definition) : save.rows;
+    rows = spreadTimes(rows, definition);
+    const sent = sentColumns(definition);
+    const json = rows.map(row => {
         const out = {};
-        definition.columns.forEach(col => { out[columnName(col)] = toDatabaseValue(row[col.csv], col); });
+        sent.forEach(col => { out[columnName(col)] = toDatabaseValue(row[col.csv], col); });
         return out;
     });
-    request.input(rowsParam, sql.NVarChar(sql.MAX), JSON.stringify(rows));
+    request.input(rowsParam, sql.NVarChar(sql.MAX), JSON.stringify(json));
 
-    // Fixed values like location = 'pantry'.
+    // Fixed values like location_code = 'pantry'.
     const whereNames = Object.keys(definition.where || {});
-    whereNames.forEach(name => request.input(`where_${index}_${name}`, sql.NVarChar(100), definition.where[name]));
-    const whereSql = whereNames.map(name => `${name} = @where_${index}_${name}`).join(' AND ');
+    const whereConditions = whereClause(request, definition, `where_${index}`);
 
-    const columns = definition.columns.map(columnName);
-    const withClause = definition.columns.map(col => `${columnName(col)} ${col.type}`).join(', ');
-    const source = `SELECT ${columns.join(', ')} FROM OPENJSON(@${rowsParam}) WITH (${withClause})`;
+    const unpacked = `OPENJSON(@${rowsParam}) AS j CROSS APPLY OPENJSON(j.[value]) WITH (${sent.map(col => `${columnName(col)} ${col.type}`).join(', ')}) AS src`;
 
-    // Rows for a recipe that doesn't exist (any more) are left out.
-    const recipeFilter = definition.recipeChild ? ' WHERE src.recipe_id IN (SELECT id FROM dbo.recipes)' : '';
+    // Any store name not in the stores table yet gets added (switched
+    // off), so the save isn't refused by the foreign key.
+    if (definition.addMissingStores) {
+        const storeCol = definition.columns.find(col => col.csv === definition.addMissingStores);
+        statements.push(`
+INSERT INTO dbo.stores (store_name, is_active)
+SELECT DISTINCT src.${columnName(storeCol)}, 0 FROM ${unpacked}
+WHERE src.${columnName(storeCol)} IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM dbo.stores AS st WHERE st.store_name = src.${columnName(storeCol)});`);
+    }
+
+    // The inner SELECT: every stored column, with lookups resolved,
+    // positions numbered and "now" filled in.
+    const stored = storedColumns(definition);
+    if (stored.some(col => col.now)) statements.push(`DECLARE @now_${index} DATETIMEOFFSET(7) = SYSDATETIMEOFFSET();`);
+    const sourceSelects = stored.map(col => {
+        const name = columnName(col);
+        if (col.position) return `CAST(j.[key] AS INT) + 1 AS ${name}`;
+        if (col.now) return `ISNULL(src.${name}, @now_${index}) AS ${name}`;
+        if (col.lookup) {
+            const match = col.lookup.match.map(m => `lk.${m} = src.${name}`).join(' OR ');
+            return `(SELECT TOP 1 lk.${col.lookup.key} FROM ${col.lookup.table} AS lk WHERE ${match}) AS ${name}`;
+        }
+        return `src.${name} AS ${name}`;
+    });
+    const source = `SELECT ${sourceSelects.join(', ')} FROM ${unpacked}`;
+    const columns = stored.map(columnName);
+
+    // Rows that can't be saved are left out rather than refusing the
+    // whole save: a recipe that no longer exists, or a required lookup
+    // (e.g. a vote's person) that isn't in its table.
+    const filters = [];
+    if (definition.recipeChild) filters.push('s.recipe_id IN (SELECT recipe_id FROM dbo.recipes)');
+    stored.filter(col => col.lookup && col.required).forEach(col => filters.push(`s.${columnName(col)} IS NOT NULL`));
+    const filterSql = filters.length ? ` WHERE ${filters.join(' AND ')}` : '';
 
     if (definition.mergeSave) {
-        const keyMatch = definition.key.map(name => `target.${name} = src.${name}`).join(' AND ');
-        const others = columns.filter(name => !definition.key.includes(name));
-        return `
+        const keyColumns = definition.key.map(csvName => columnName(definition.columns.find(col => col.csv === csvName)));
+        const keyMatch = keyColumns.map(name => `target.${name} = s.${name}`).join(' AND ');
+        const others = columns.filter(name => !keyColumns.includes(name));
+        statements.push(`
 MERGE ${definition.table} AS target
-USING (${source}) AS src
+USING (${source}) AS s
 ON ${keyMatch}
-WHEN MATCHED THEN UPDATE SET ${others.map(name => `${name} = src.${name}`).join(', ')}
-WHEN NOT MATCHED BY TARGET THEN INSERT (${columns.join(', ')}) VALUES (${columns.map(name => `src.${name}`).join(', ')})
-WHEN NOT MATCHED BY SOURCE THEN DELETE;`;
+WHEN MATCHED THEN UPDATE SET ${others.map(name => `${name} = s.${name}`).join(', ')}
+WHEN NOT MATCHED BY TARGET THEN INSERT (${columns.join(', ')}) VALUES (${columns.map(name => `s.${name}`).join(', ')})
+WHEN NOT MATCHED BY SOURCE THEN DELETE;`);
+        return statements.join('\n');
+    }
+
+    if (mode === 'replace') {
+        statements.push(`DELETE FROM ${definition.table}${whereConditions.length ? ` WHERE ${whereConditions.join(' AND ')}` : ''};`);
     }
 
     const insertColumns = whereNames.concat(columns);
-    const selectValues = whereNames.map(name => `@where_${index}_${name}`).concat(columns.map(name => `src.${name}`));
-    const insertSql = `
+    const selectValues = whereNames.map(name => `@where_${index}_${name}`).concat(columns.map(name => `s.${name}`));
+    statements.push(`
 INSERT INTO ${definition.table} (${insertColumns.join(', ')})
-${definition.identity ? 'OUTPUT INSERTED.id' : ''}
-SELECT ${selectValues.join(', ')} FROM (${source}) AS src${recipeFilter};`;
+SELECT ${selectValues.join(', ')} FROM (${source}) AS s${filterSql};`);
 
-    if (mode === 'append') return insertSql;
-
-    const deleteSql = `DELETE FROM ${definition.table}${whereSql ? ` WHERE ${whereSql}` : ''};`;
-    return deleteSql + insertSql;
+    return statements.join('\n');
 }
 
 async function saveManyAsync(saves) {
-    const result = await runBatch(request => {
+    await runBatch(request => {
         const statements = saves.map((save, index) => buildSaveSql(request, save, index));
         return `SET XACT_ABORT ON;
 BEGIN TRANSACTION;
 ${statements.join('\n')}
 COMMIT TRANSACTION;`;
     });
-
-    // Any new ids the database gave out (from OUTPUT INSERTED.id),
-    // e.g. so a newly saved price can be sent back with its real id.
-    return (result.recordsets || []).flat().map(record => String(record.id));
 }
 
-// The callback versions server.js uses: callback(err, newIds).
+// The callback versions server.js uses: callback(err).
 function saveMany(saves, callback) {
-    saveManyAsync(saves).then(ids => callback(null, ids), err => {
+    saveManyAsync(saves).then(() => callback(null), err => {
         console.error(`Database: could not save ${saves.map(s => s.file).join(' + ')}:`, err.message);
-        callback(err, null);
+        callback(err);
     });
 }
 
@@ -547,7 +705,7 @@ function replaceRows(file, rows, callback) {
 
 // Adds these rows to one old "file", leaving what's there alone.
 function appendRows(file, rows, callback) {
-    if (rows.length === 0) return callback(null, []);
+    if (rows.length === 0) return callback(null);
     saveMany([{ file, rows, mode: 'append' }], callback);
 }
 
@@ -555,10 +713,7 @@ function appendRows(file, rows, callback) {
 async function countRows(file) {
     const definition = tableFor(file);
     const result = await runBatch(request => {
-        const conditions = Object.entries(definition.where || {}).map(([name, value]) => {
-            request.input(`where_${name}`, sql.NVarChar(100), value);
-            return `${name} = @where_${name}`;
-        });
+        const conditions = whereClause(request, definition, 'where');
         return `SELECT COUNT(*) AS total FROM ${definition.table}` +
             (conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '') + ';';
     });
@@ -577,6 +732,7 @@ async function close() {
 module.exports = {
     enabled,
     TABLES,
+    watchListId,
     readRows,
     readRowsAsync,
     replaceRows,

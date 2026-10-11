@@ -56,12 +56,15 @@ This is intended to help with a couple of issues:
 ## How it's built
 
 - **No framework.** Plain HTML, CSS and JavaScript pages, and one Node.js server (`server.js`) using Node's built-in `http` module.
-- **Data is stored in an Azure SQL Database** (Microsoft SQL Server in the cloud, on the free offer). There are 11 tables, one for each kind of data: inventory, recipes, recipe ingredients, votes, aliases, prices, the activity log, stock minimums, barcodes, the meal plan and the watch list. See `database/create-tables.sql`.
+- **Data is stored in an Azure SQL Database** (Microsoft SQL Server in the cloud, on the free offer). There are 14 tables: people, stores and storage locations, plus inventory, recipes, recipe ingredients, votes, aliases, prices, the activity log, stock minimums, barcodes, the meal plan and the watch list. See `database/create-tables.sql`, and [`docs/database-design.md`](docs/database-design.md) for the crow's foot and UML diagrams.
+  - Only `people` has a number id. Every other table is keyed by its real-world identity, with composite keys where one column isn't enough (stock is keyed on storage area + name + unit, prices on store + product + time).
+  - `server.js` still works with names ("Todd", "Woolworths Ferrymead"). `database.js` swaps them for keys inside the SQL.
   - Each save is one T-SQL batch in a single transaction. The rows are sent as JSON and unpacked with `OPENJSON`, so a save is all-or-nothing.
   - Recipes save with `MERGE`, and their ingredients, votes and meal-plan entries are linked by foreign keys with `ON DELETE CASCADE`.
   - Prices and the activity log are insert-only, so the full history is kept line by line.
   - Saves still go through a one-at-a-time queue, so two people saving at once can't overwrite each other.
-- **The CSV files are still supported as a fallback.** The site only uses the database when `database-config.js` exists. Without it, it reads and writes the original CSV files exactly as before. Deleting the config file switches straight back.
+- **The CSV files are retired.** The site needs `database-config.js` and stops with a clear message without it. The old CSV files are kept on the garage as an archive.
+- **The store list and who can log in live in the database.** Adding a store (with its cookie value or store ID as `store_code`) or a person is one `INSERT` in SSMS, picked up within the hour.
 - **The free database pauses itself when idle**, and its awake time counts against a monthly allowance. So the server never connects at start-up (it restarts every hour), closes idle connections after 30 seconds, and waits and retries while a paused database wakes up.
 - **The supermarket scrapers use [Playwright](https://playwright.dev)**. They open a real Chromium browser, run the search on the store's own website, and read the prices out of the website's own data requests. Trents needs a real account login.
 - **Recipe import** reads the hidden `schema.org/Recipe` data that recipe websites embed for Google. It then converts each ingredient line ("1 1/2 cups plain flour") into the app's name / quantity / unit format.
@@ -71,9 +74,11 @@ This is intended to help with a couple of issues:
 | `server.js` | The whole back end: reading and saving data, login, scrapers, recipe import, meal plan, watch list |
 | `database.js` | Everything that talks to Azure SQL: which table each kind of data lives in, reads, transactional saves, retries |
 | `csv.js` | Reads CSV files (shared by `server.js` and the migration script) |
-| `database/create-tables.sql` | Creates all the tables. Run once in SSMS with the admin login |
-| `database/migrate-csv-to-database.js` | One-off copy of every CSV file into the database |
-| `database/check-migration.sql` | Queries to check the copy worked |
+| `database/create-tables.sql` | Creates all the tables in a new, empty database, with the starting people, stores and storage areas |
+| `database/phase2-upgrade.sql` | One-off upgrade of the live database from the phase 1 tables to phase 2 |
+| `database/migrate-csv-to-database.js` | Copies every CSV file into a database (now for filling a test database from the archived CSVs) |
+| `database/check-migration.sql` | Queries to check the data is all there |
+| `docs/database-design.md` | The database design, with crow's foot and UML diagrams |
 | `database-config.example.js` | What the real (gitignored) `database-config.js` looks like |
 | `ingredient-data.js` | Built-in ingredient aliases (US to NZ names etc.) and tin sizes |
 | `index.html` / `script.js` | Inventory page |
@@ -106,18 +111,14 @@ module.exports = {
 };
 ```
 
-**2. Where the data goes.** Locally, you'd normally leave out `database-config.js` so the site uses CSV files in this folder. Only create it if you want to test against Azure SQL, and remember that's the **real** household data (your computer's IP address also has to be allowed in the Azure SQL server's firewall).
+**2. `database-config.js`** says which database to use (copy `database-config.example.js`). Don't point your own computer at the live `pantry` database, or your testing changes the real household data. Instead:
 
-For CSV mode, each data file needs at least its header row. The rest are created automatically when first used.
+1. In the Azure portal, create a second free database, e.g. `pantry_dev`, on the same server (the free offer allows several).
+2. In SSMS (admin login, `pantry_dev`), run `database/create-tables.sql`, and create a `pantry_app` user there too.
+3. Optionally fill it from CSV copies with `node database/migrate-csv-to-database.js`.
+4. Set `database: 'pantry_dev'` in your local `database-config.js`. Your computer's IP address has to be allowed in the server's firewall.
 
-| File | Header row |
-|---|---|
-| `pantry.csv`, `fridge.csv`, `freezer.csv`, `chest.csv` | `name,quantity,unit` |
-| `recipes.csv` | `id,name,instructions,servings` |
-| `recipe_ingredients.csv` | `recipe_id,ingredient_name,quantity,unit` |
-| `recipe_votes.csv` | `recipe_id,person,vote` |
-
-`server.js` creates these itself the first time they're needed: `prices.csv`, `ingredient_aliases.csv`, `stock_minimums.csv`, `barcodes.csv`, `meal_plan.csv`, `watch_list.csv`, `activity_log.csv`, `sessions.json`, `watch_check_status.json`.
+`server.js` creates `sessions.json` and `watch_check_status.json` itself the first time they're needed.
 
 **3. `dev-server.js`** is a small local-only launcher. On the real server a web server sits in front of `server.js`: it serves the pages and passes anything starting with `/recipes/` through to `server.js` (port 3000) with that prefix removed. `dev-server.js` does the same job on port 8080 and starts `server.js` for you:
 
@@ -125,7 +126,7 @@ For CSV mode, each data file needs at least its header row. The rest are created
 npm run dev
 ```
 
-Then open <http://localhost:8080>. The login is a household member's first name as both the username and password (see `HOUSEHOLD_MEMBERS` in `server.js`).
+Then open <http://localhost:8080>. The login is a household member's first name as both the username and password (the names in the `people` table).
 
 ## How it runs at home
 
@@ -138,7 +139,7 @@ The live copy runs on a small Linux server in the garage, at `/opt/Ingredients_A
 - **The Azure firewall** only lets in the garage's internet address (and the PC used for SSMS). If the home internet address changes, the site's log says Azure blocked the IP. Add the new address under the SQL server's *Security → Networking* in the Azure portal.
 
 - **`ingredients-recipes.service`** runs `server.js`. It runs under `xvfb-run`, which gives the scrapers' browser a virtual screen. A web server in front of it serves the pages and proxies `/recipes/` to it.
-- **`ingredients-recipes-update.timer`** deploys every hour. It fetches from GitHub, runs `git reset --hard origin/main` and `git clean -fd`, then restarts the service. Because the data files are gitignored, a deploy never touches them.
+- **`ingredients-recipes-update.timer`** deploys every hour. It fetches from GitHub, runs `git reset --hard origin/main` and `git clean -fd`, then restarts the service. Because the data files are gitignored, a deploy never touches them. The restart also re-reads the store list and people from the database.
 - **`pantry-backup.timer`** runs `backup-data.sh` every night at 3am. Since the move to Azure SQL, the database itself is backed up automatically by Azure. This script still backs up `sessions.json` (who's logged in) and the old CSV files, but it doesn't back up the database. It zips every data file into `/opt/pantry-backups/pantry-YYYY-MM-DD.tar.gz` and keeps 30 days. Restore steps are at the top of the script.
 - **The watch list's morning price check** runs inside `server.js` itself, from 7am NZ time. It needs no extra timer.
 
@@ -152,4 +153,15 @@ The live copy runs on a small Linux server in the garage, at `/opt/Ingredients_A
 6. `systemctl start ingredients-recipes && systemctl start ingredients-recipes-update.timer`.
 7. In SSMS, run `database/check-migration.sql` to see the data.
 
-To go back to the CSV files, delete `database-config.js` and restart the service. Anything changed while it was on the database is only in the database.
+(Done on 11 October 2026. Since phase 2 the CSV fallback is gone, so deleting `database-config.js` no longer switches back to the CSV files.)
+
+### Upgrading the live database to phase 2 (one-off)
+
+The website code and the tables have to change together, so the site is stopped for a few minutes.
+
+1. In SSMS, take a backup copy first: right-click the `pantry` database → **Tasks → Export Data-tier Application**, and save the `.bacpac` file on your PC.
+2. On the garage: `systemctl stop ingredients-recipes-update.timer && systemctl stop ingredients-recipes`.
+3. In SSMS (admin login, `pantry` database), open and run `database/phase2-upgrade.sql`. It runs as one transaction: if anything fails, nothing changes. It finishes by listing every table's row count.
+4. Push the phase 2 code from your PC, then run update-pantry on the garage (this starts the site again on the new code).
+5. `systemctl start ingredients-recipes-update.timer`.
+6. In SSMS, run `database/check-migration.sql`, and try the site.

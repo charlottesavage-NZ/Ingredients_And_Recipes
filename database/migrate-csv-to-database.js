@@ -16,6 +16,8 @@
 // - leaves the CSV files themselves completely untouched, so they're
 //   still there as a backup (and as a way back - just remove
 //   database-config.js and the site goes back to using them)
+//   (UPDATE, phase 2: the site no longer falls back to the CSV files,
+//   so they're an archive now rather than a way back.)
 //
 // It refuses to run if the database already has data in it, so it
 // can't accidentally wipe out anything added through the site since.
@@ -34,6 +36,13 @@
 //   longer exists are left out (and counted below)
 // - two stock rows for the same thing in the same place (e.g. "Rice"
 //   and "rice", both in g) are combined, quantities added together
+//
+// UPDATE, phase 2: the live database has been moved over already, so
+// this is now for filling a NEW database (e.g. a pantry_dev copy for
+// testing) from the archived CSV files. Make the tables first with
+// database/create-tables.sql - it also adds the people, stores and
+// storage areas these rows point at. Activity log lines keep their
+// original NZ date and time.
 // -------------------------------------------------------------
 
 const fs = require('fs');
@@ -78,6 +87,22 @@ function tidyPrices(rows, problems) {
     return good.sort((a, b) => a.date_checked.localeCompare(b.date_checked));
 }
 
+// activity_log.csv: each line's NZ date + time ("2026-10-14", "18:05")
+// turned into one exact moment (logged_at), allowing for daylight
+// saving. Works out NZ's offset from UTC at that moment by asking what
+// the NZ clock showed then.
+function nzToIso(date, time) {
+    const guess = Date.parse(`${date}T${time || '00:00'}:00Z`);
+    if (Number.isNaN(guess)) return '';
+    const shown = new Date(guess).toLocaleString('sv-SE', { timeZone: 'Pacific/Auckland' }).replace(' ', 'T') + 'Z';
+    const offset = Date.parse(shown) - guess;
+    return new Date(guess - offset).toISOString();
+}
+
+function tidyActivityLog(rows) {
+    return rows.map(row => ({ ...row, logged_at: nzToIso(row.date, row.time) }));
+}
+
 async function main() {
     if (!database.enabled) {
         console.error('database-config.js was not found in the project folder, so there is no database to copy into.');
@@ -108,6 +133,7 @@ async function main() {
         csvCounts[file] = rows === null ? 'no file' : rows.length;
         rows = rows || [];
         if (file === 'prices.csv') rows = tidyPrices(rows, problems);
+        if (file === 'activity_log.csv') rows = tidyActivityLog(rows);
         // 'replace' empties each table and loads the CSV's rows, all
         // inside the one transaction.
         return { file, rows, mode: 'replace' };

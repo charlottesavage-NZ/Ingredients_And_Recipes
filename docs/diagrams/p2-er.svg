@@ -1,0 +1,384 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2240 808" role="img" aria-label="Phase 2 crow&apos;s foot diagram" width="2240" height="808">
+<rect width="2240" height="808" fill="#ffffff"/>
+<path d="M 410.0 74.0 L 310.0 74.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 690.0 74.0 L 790.0 74.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 1170.0 74.0 L 1070.0 74.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 1450.0 74.0 L 1550.0 74.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 1930.0 74.0 L 1830.0 74.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 550.0 146.0 L 550.0 296.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 410.0 340.0 L 310.0 340.0" fill="none" stroke="#1c6a84" stroke-width="1.6" stroke-dasharray="6 5"/>
+<path d="M 2070.0 206.0 L 2070.0 296.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 1690.0 186.0 L 1690.0 340.0 L 1930.0 340.0" fill="none" stroke="#1c6a84" stroke-width="1.6" stroke-dasharray="6 5"/>
+<path d="M 1240.0 106.0 L 1240.0 256.0 L 930.0 256.0 L 930.0 296.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 1360.0 106.0 L 1360.0 296.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 930.0 622.0 L 930.0 512.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 1070.0 666.0 L 1310.0 666.0 L 1310.0 532.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 790.0 666.0 L 690.0 666.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 550.0 432.0 L 550.0 622.0" fill="none" stroke="#1c6a84" stroke-width="1.6" stroke-dasharray="6 5"/>
+<path d="M 310.0 666.0 L 410.0 666.0" fill="none" stroke="#1c6a84" stroke-width="1.6" stroke-dasharray="6 5"/>
+<g>
+<rect x="30" y="30" width="280" height="96" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 30 60 H 310" stroke="#1c6a84" stroke-width="1"/>
+<rect x="30.7" y="30.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="170.0" y="50" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">meal_plan</text>
+<text x="40" y="77" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="92" y="77" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">day</text>
+<text x="300" y="77" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(10)</text>
+<rect x="31" y="83" width="278" height="20" fill="#f4f8fa"/>
+<text x="40" y="97" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK FK</text>
+<text x="92" y="97" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">recipe_id</text>
+<text x="300" y="97" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(20)</text>
+<text x="40" y="117" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="92" y="117" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">people_count</text>
+<text x="300" y="117" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+</g>
+<g>
+<rect x="410" y="30" width="280" height="116" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 410 60 H 690" stroke="#1c6a84" stroke-width="1"/>
+<rect x="410.7" y="30.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="550.0" y="50" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">recipes</text>
+<text x="420" y="77" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="472" y="77" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">recipe_id</text>
+<text x="680" y="77" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(20)</text>
+<rect x="411" y="83" width="278" height="20" fill="#f4f8fa"/>
+<text x="420" y="97" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="472" y="97" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">name</text>
+<text x="680" y="97" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(200)</text>
+<text x="420" y="117" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="472" y="117" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">instructions</text>
+<text x="680" y="117" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(max)</text>
+<rect x="411" y="123" width="278" height="20" fill="#f4f8fa"/>
+<text x="420" y="137" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="472" y="137" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">servings</text>
+<text x="680" y="137" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+</g>
+<g>
+<rect x="790" y="30" width="280" height="96" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 790 60 H 1070" stroke="#1c6a84" stroke-width="1"/>
+<rect x="790.7" y="30.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="930.0" y="50" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">recipe_votes</text>
+<text x="800" y="77" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK FK</text>
+<text x="852" y="77" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">recipe_id</text>
+<text x="1060" y="77" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(20)</text>
+<rect x="791" y="83" width="278" height="20" fill="#f4f8fa"/>
+<text x="800" y="97" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK FK</text>
+<text x="852" y="97" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">person_id</text>
+<text x="1060" y="97" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+<text x="800" y="117" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="852" y="117" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">vote</text>
+<text x="1060" y="117" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(10)</text>
+</g>
+<g>
+<rect x="1170" y="30" width="280" height="76" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 1170 60 H 1450" stroke="#1c6a84" stroke-width="1"/>
+<rect x="1170.7" y="30.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="1310.0" y="50" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">people</text>
+<text x="1180" y="77" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="1232" y="77" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">person_id</text>
+<text x="1440" y="77" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+<rect x="1171" y="83" width="278" height="20" fill="#f4f8fa"/>
+<text x="1180" y="97" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">UK</text>
+<text x="1232" y="97" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">name</text>
+<text x="1440" y="97" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(50)</text>
+</g>
+<g>
+<rect x="1550" y="30" width="280" height="156" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 1550 60 H 1830" stroke="#1c6a84" stroke-width="1"/>
+<rect x="1550.7" y="30.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="1690.0" y="50" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">watch_list</text>
+<text x="1560" y="77" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK FK</text>
+<text x="1612" y="77" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">store_name</text>
+<text x="1820" y="77" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(100)</text>
+<rect x="1551" y="83" width="278" height="20" fill="#f4f8fa"/>
+<text x="1560" y="97" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="1612" y="97" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">item_name</text>
+<text x="1820" y="97" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(300)</text>
+<text x="1560" y="117" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="1612" y="117" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">package_size</text>
+<text x="1820" y="117" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(50)</text>
+<rect x="1551" y="123" width="278" height="20" fill="#f4f8fa"/>
+<text x="1560" y="137" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1612" y="137" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">search_term</text>
+<text x="1820" y="137" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(300)</text>
+<text x="1560" y="157" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">FK</text>
+<text x="1612" y="157" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">added_by_person_id</text>
+<text x="1820" y="157" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+<rect x="1551" y="163" width="278" height="20" fill="#f4f8fa"/>
+<text x="1560" y="177" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1612" y="177" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">date_added</text>
+<text x="1820" y="177" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">date</text>
+</g>
+<g>
+<rect x="1930" y="30" width="280" height="176" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 1930 60 H 2210" stroke="#1c6a84" stroke-width="1"/>
+<rect x="1930.7" y="30.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="2070.0" y="50" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">stores</text>
+<text x="1940" y="77" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="1992" y="77" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">store_name</text>
+<text x="2200" y="77" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(100)</text>
+<rect x="1931" y="83" width="278" height="20" fill="#f4f8fa"/>
+<text x="1940" y="97" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="97" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">chain</text>
+<text x="2200" y="97" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(50)</text>
+<text x="1940" y="117" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="117" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">suburb</text>
+<text x="2200" y="117" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(50)</text>
+<rect x="1931" y="123" width="278" height="20" fill="#f4f8fa"/>
+<text x="1940" y="137" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="137" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">store_code</text>
+<text x="2200" y="137" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(200)</text>
+<text x="1940" y="157" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="157" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">is_main_store</text>
+<text x="2200" y="157" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">bit</text>
+<rect x="1931" y="163" width="278" height="20" fill="#f4f8fa"/>
+<text x="1940" y="177" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="177" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">is_preferred</text>
+<text x="2200" y="177" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">bit</text>
+<text x="1940" y="197" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="197" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">is_active</text>
+<text x="2200" y="197" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">bit</text>
+</g>
+<g>
+<rect x="30" y="296" width="280" height="76" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 30 326 H 310" stroke="#1c6a84" stroke-width="1"/>
+<rect x="30.7" y="296.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="170.0" y="316" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">ingredient_aliases</text>
+<text x="40" y="343" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="92" y="343" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">alias</text>
+<text x="300" y="343" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(200)</text>
+<rect x="31" y="349" width="278" height="20" fill="#f4f8fa"/>
+<text x="40" y="363" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="92" y="363" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">canonical_name</text>
+<text x="300" y="363" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(200)</text>
+</g>
+<g>
+<rect x="410" y="296" width="280" height="136" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 410 326 H 690" stroke="#1c6a84" stroke-width="1"/>
+<rect x="410.7" y="296.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="550.0" y="316" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">recipe_ingredients</text>
+<text x="420" y="343" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK FK</text>
+<text x="472" y="343" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">recipe_id</text>
+<text x="680" y="343" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(20)</text>
+<rect x="411" y="349" width="278" height="20" fill="#f4f8fa"/>
+<text x="420" y="363" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="472" y="363" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">ingredient_name</text>
+<text x="680" y="363" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(200)</text>
+<text x="420" y="383" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="472" y="383" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">unit</text>
+<text x="680" y="383" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(20)</text>
+<rect x="411" y="389" width="278" height="20" fill="#f4f8fa"/>
+<text x="420" y="403" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="472" y="403" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">quantity</text>
+<text x="680" y="403" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">decimal(12,3)</text>
+<text x="420" y="423" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="472" y="423" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">sort_order</text>
+<text x="680" y="423" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+</g>
+<g>
+<rect x="790" y="296" width="280" height="216" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 790 326 H 1070" stroke="#1c6a84" stroke-width="1"/>
+<rect x="790.7" y="296.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="930.0" y="316" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">activity_log</text>
+<text x="800" y="343" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="852" y="343" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">logged_at</text>
+<text x="1060" y="343" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">datetimeoffset(7)</text>
+<rect x="791" y="349" width="278" height="20" fill="#f4f8fa"/>
+<text x="800" y="363" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="852" y="363" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">line_no</text>
+<text x="1060" y="363" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+<text x="800" y="383" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">FK</text>
+<text x="852" y="383" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">person_id</text>
+<text x="1060" y="383" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+<rect x="791" y="389" width="278" height="20" fill="#f4f8fa"/>
+<text x="800" y="403" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="852" y="403" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">action</text>
+<text x="1060" y="403" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(50)</text>
+<text x="800" y="423" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="852" y="423" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">item</text>
+<text x="1060" y="423" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(200)</text>
+<rect x="791" y="429" width="278" height="20" fill="#f4f8fa"/>
+<text x="800" y="443" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="852" y="443" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">quantity</text>
+<text x="1060" y="443" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">decimal(12,3)</text>
+<text x="800" y="463" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="852" y="463" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">unit</text>
+<text x="1060" y="463" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(20)</text>
+<rect x="791" y="469" width="278" height="20" fill="#f4f8fa"/>
+<text x="800" y="483" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">FK</text>
+<text x="852" y="483" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">location_code</text>
+<text x="1060" y="483" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(10)</text>
+<text x="800" y="503" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="852" y="503" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">details</text>
+<text x="1060" y="503" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(max)</text>
+</g>
+<g>
+<rect x="1170" y="296" width="280" height="236" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 1170 326 H 1450" stroke="#1c6a84" stroke-width="1"/>
+<rect x="1170.7" y="296.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="1310.0" y="316" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">barcodes</text>
+<text x="1180" y="343" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="1232" y="343" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">barcode</text>
+<text x="1440" y="343" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(50)</text>
+<rect x="1171" y="349" width="278" height="20" fill="#f4f8fa"/>
+<text x="1180" y="363" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1232" y="363" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">item_name</text>
+<text x="1440" y="363" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(200)</text>
+<text x="1180" y="383" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1232" y="383" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">brand</text>
+<text x="1440" y="383" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(100)</text>
+<rect x="1171" y="389" width="278" height="20" fill="#f4f8fa"/>
+<text x="1180" y="403" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1232" y="403" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">product_name</text>
+<text x="1440" y="403" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(300)</text>
+<text x="1180" y="423" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1232" y="423" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">quantity</text>
+<text x="1440" y="423" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">decimal(12,3)</text>
+<rect x="1171" y="429" width="278" height="20" fill="#f4f8fa"/>
+<text x="1180" y="443" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1232" y="443" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">unit</text>
+<text x="1440" y="443" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(20)</text>
+<text x="1180" y="463" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">FK</text>
+<text x="1232" y="463" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">location_code</text>
+<text x="1440" y="463" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(10)</text>
+<rect x="1171" y="469" width="278" height="20" fill="#f4f8fa"/>
+<text x="1180" y="483" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1232" y="483" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">source</text>
+<text x="1440" y="483" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(20)</text>
+<text x="1180" y="503" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">FK</text>
+<text x="1232" y="503" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">added_by_person_id</text>
+<text x="1440" y="503" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+<rect x="1171" y="509" width="278" height="20" fill="#f4f8fa"/>
+<text x="1180" y="523" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1232" y="523" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">date_added</text>
+<text x="1440" y="523" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">date</text>
+</g>
+<g>
+<rect x="1930" y="296" width="280" height="196" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 1930 326 H 2210" stroke="#1c6a84" stroke-width="1"/>
+<rect x="1930.7" y="296.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="2070.0" y="316" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">prices</text>
+<text x="1940" y="343" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK FK</text>
+<text x="1992" y="343" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">store_name</text>
+<text x="2200" y="343" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(100)</text>
+<rect x="1931" y="349" width="278" height="20" fill="#f4f8fa"/>
+<text x="1940" y="363" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="1992" y="363" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">item_name</text>
+<text x="2200" y="363" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(300)</text>
+<text x="1940" y="383" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="1992" y="383" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">date_checked</text>
+<text x="2200" y="383" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">datetimeoffset(3)</text>
+<rect x="1931" y="389" width="278" height="20" fill="#f4f8fa"/>
+<text x="1940" y="403" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="403" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">price</text>
+<text x="2200" y="403" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">decimal(10,2)</text>
+<text x="1940" y="423" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="423" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">cup_price</text>
+<text x="2200" y="423" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">decimal(10,2)</text>
+<rect x="1931" y="429" width="278" height="20" fill="#f4f8fa"/>
+<text x="1940" y="443" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="443" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">cup_measure</text>
+<text x="2200" y="443" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(50)</text>
+<text x="1940" y="463" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="463" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">package_size</text>
+<text x="2200" y="463" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(50)</text>
+<rect x="1931" y="469" width="278" height="20" fill="#f4f8fa"/>
+<text x="1940" y="483" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="1992" y="483" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">original_name</text>
+<text x="2200" y="483" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(300)</text>
+</g>
+<g>
+<rect x="30" y="622" width="280" height="96" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 30 652 H 310" stroke="#1c6a84" stroke-width="1"/>
+<rect x="30.7" y="622.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="170.0" y="642" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">stock_minimums</text>
+<text x="40" y="669" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="92" y="669" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">name</text>
+<text x="300" y="669" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(200)</text>
+<rect x="31" y="675" width="278" height="20" fill="#f4f8fa"/>
+<text x="40" y="689" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="92" y="689" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">unit</text>
+<text x="300" y="689" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(20)</text>
+<text x="40" y="709" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="92" y="709" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">minimum</text>
+<text x="300" y="709" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">decimal(12,3)</text>
+</g>
+<g>
+<rect x="410" y="622" width="280" height="156" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 410 652 H 690" stroke="#1c6a84" stroke-width="1"/>
+<rect x="410.7" y="622.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="550.0" y="642" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">inventory</text>
+<text x="420" y="669" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK FK</text>
+<text x="472" y="669" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">location_code</text>
+<text x="680" y="669" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(10)</text>
+<rect x="411" y="675" width="278" height="20" fill="#f4f8fa"/>
+<text x="420" y="689" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="472" y="689" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">name</text>
+<text x="680" y="689" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(200)</text>
+<text x="420" y="709" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="472" y="709" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">unit</text>
+<text x="680" y="709" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(20)</text>
+<rect x="411" y="715" width="278" height="20" fill="#f4f8fa"/>
+<text x="420" y="729" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="472" y="729" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">quantity</text>
+<text x="680" y="729" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">decimal(12,3)</text>
+<text x="420" y="749" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="472" y="749" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">track</text>
+<text x="680" y="749" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(10)</text>
+<rect x="411" y="755" width="278" height="20" fill="#f4f8fa"/>
+<text x="420" y="769" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="472" y="769" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">low</text>
+<text x="680" y="769" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">bit</text>
+</g>
+<g>
+<rect x="790" y="622" width="280" height="116" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 790 652 H 1070" stroke="#1c6a84" stroke-width="1"/>
+<rect x="790.7" y="622.7" width="278.6" height="28.8" rx="3.5" fill="#e3eff4"/>
+<text x="930.0" y="642" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">locations</text>
+<text x="800" y="669" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
+<text x="852" y="669" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">location_code</text>
+<text x="1060" y="669" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(10)</text>
+<rect x="791" y="675" width="278" height="20" fill="#f4f8fa"/>
+<text x="800" y="689" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="852" y="689" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">location_name</text>
+<text x="1060" y="689" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(50)</text>
+<text x="800" y="709" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="852" y="709" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">storage_type</text>
+<text x="1060" y="709" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(10)</text>
+<rect x="791" y="715" width="278" height="20" fill="#f4f8fa"/>
+<text x="800" y="729" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="852" y="729" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">sort_order</text>
+<text x="1060" y="729" text-anchor="end" font-size="11.5" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+</g>
+<g transform="translate(410.0 74.0) rotate(180.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><line x1="15" y1="-7" x2="15" y2="7"/></g>
+<g transform="translate(310.0 74.0) rotate(0.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(690.0 74.0) rotate(0.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><line x1="15" y1="-7" x2="15" y2="7"/></g>
+<g transform="translate(790.0 74.0) rotate(180.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(1170.0 74.0) rotate(180.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><line x1="15" y1="-7" x2="15" y2="7"/></g>
+<g transform="translate(1070.0 74.0) rotate(0.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(1450.0 74.0) rotate(0.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><line x1="15" y1="-7" x2="15" y2="7"/></g>
+<g transform="translate(1550.0 74.0) rotate(180.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(1930.0 74.0) rotate(180.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><line x1="15" y1="-7" x2="15" y2="7"/></g>
+<g transform="translate(1830.0 74.0) rotate(0.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(550.0 146.0) rotate(90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><line x1="15" y1="-7" x2="15" y2="7"/></g>
+<g transform="translate(550.0 296.0) rotate(-90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(410.0 340.0) rotate(180.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(310.0 340.0) rotate(0.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(2070.0 206.0) rotate(90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><line x1="15" y1="-7" x2="15" y2="7"/></g>
+<g transform="translate(2070.0 296.0) rotate(-90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(1690.0 186.0) rotate(90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(1930.0 340.0) rotate(180.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(1240.0 106.0) rotate(90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(930.0 296.0) rotate(-90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(1360.0 106.0) rotate(90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(1360.0 296.0) rotate(-90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(930.0 622.0) rotate(-90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(930.0 512.0) rotate(90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(1070.0 666.0) rotate(0.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(1310.0 532.0) rotate(90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(790.0 666.0) rotate(180.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="9" y1="-7" x2="9" y2="7"/><line x1="15" y1="-7" x2="15" y2="7"/></g>
+<g transform="translate(690.0 666.0) rotate(0.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(550.0 432.0) rotate(90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(550.0 622.0) rotate(-90.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(310.0 666.0) rotate(0.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+<g transform="translate(410.0 666.0) rotate(180.0)" stroke="#1c6a84" stroke-width="1.6" fill="none"><line x1="0" y1="-8" x2="14" y2="0"/><line x1="0" y1="8" x2="14" y2="0"/><line x1="0" y1="0" x2="14" y2="0"/><circle cx="21" cy="0" r="5" fill="#ffffff"/></g>
+</svg>

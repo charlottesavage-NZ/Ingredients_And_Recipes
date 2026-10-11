@@ -21,13 +21,20 @@ const { TRENTS_USERNAME, TRENTS_PASSWORD } = require('./credentials');
 // "Ground Beef" -> "Mince") - see ingredient-data.js for the details.
 const { BUILT_IN_ALIASES, EXTRA_INGREDIENT_NAMES, TINNED_GOODS, DEFAULT_TIN_SIZE } = require('./ingredient-data');
 
-// Reading CSV text into rows - see csv.js.
-const { parseCSV } = require('./csv');
-
 // The Azure SQL database - see database.js. Until the gitignored
 // database-config.js file exists, database.enabled is false and
 // everything below keeps using the CSV files exactly as before.
+// (UPDATE, phase 2: the CSV files are retired - all the household
+// data lives in the database now, so without database-config.js the
+// server stops straight away with a message saying so. The old CSV
+// files are kept on the garage as an archive.)
 const database = require('./database');
+
+if (!database.enabled) {
+    console.error('database-config.js was not found, so there is no database to use. ' +
+        'Create it from database-config.example.js (see the README), then start the server again.');
+    process.exit(1);
+}
 
 const PORT = 3000;
 
@@ -55,7 +62,10 @@ const RECIPES_FILE = 'recipes.csv';
 const RECIPE_INGREDIENTS_FILE = 'recipe_ingredients.csv';
 const RECIPE_VOTES_FILE = 'recipe_votes.csv';
 
-const HOUSEHOLD_MEMBERS = ['Charlotte', 'Todd', 'Kayleigh'];
+// (UPDATE, phase 2: the household members - who can log in and vote -
+// are now the people table in the database, read by readPeople() in
+// the LOGIN section, instead of a list typed in here. To add someone,
+// add a row to dbo.people.)
 
 // -------------------------------------------------------------
 // Every price you save from the Price Checker page goes in here.
@@ -92,11 +102,13 @@ const ALIAS_HEADERS = ['alias', 'canonical_name'];
 // Storage -> Cookies -> find "cw-lrkswrdjp" and copy its value in
 // here under whatever name you want it labelled with on the page.
 // -------------------------------------------------------------
-const WOOLWORTHS_STORES = {
-    'Woolworths Moorhouse': 'dm-Pickup,f-9169,a-495,s-10235',
-    'Woolworths Northlands': 'dm-Pickup,f-9540,a-480,s-38',
-    'Woolworths Ferrymead': 'dm-Pickup,f-9576,a-726,s-10410'
-};
+// UPDATE, phase 2: the stores now live in the database's stores
+// table (with their chain, suburb, cookie value as store_code, and
+// main / preferred / active ticks), and these lists are filled in
+// from it by loadStores() below. To add a store, add a row to
+// dbo.stores with chain 'Woolworths' and the cookie value as its
+// store_code - no code change needed.
+const WOOLWORTHS_STORES = {};
 
 // Whichever store gets used if none is specifically chosen.
 const DEFAULT_WOOLWORTHS_STORE = 'Woolworths Moorhouse';
@@ -107,12 +119,9 @@ const DEFAULT_WOOLWORTHS_STORE = 'Woolworths Moorhouse';
 // together to remember your store rather than one. IDs found via
 // the "contentstackStores" data sitting in the page itself.
 // -------------------------------------------------------------
-const PAKNSAVE_STORES = {
-    "PAK'nSAVE Moorhouse": '61dd754e-8525-4b9e-9e08-173389eea8a8',
-    "PAK'nSAVE Papanui": '8cd700ae-d96f-4761-bd7a-805d6b93536d',
-    "PAK'nSAVE Riccarton": '4a279605-eaa8-470d-bcd4-0a9e3c9ab43b',
-    "PAK'nSAVE Wainoni": 'dbca5e00-f7f9-43ae-91de-031ad16f8a92'
-};
+// (UPDATE, phase 2: filled in from the stores table too - chain
+// "PAK'nSAVE", with the store ID as its store_code.)
+const PAKNSAVE_STORES = {};
 
 const DEFAULT_PAKNSAVE_STORE = "PAK'nSAVE Moorhouse";
 
@@ -130,8 +139,34 @@ const TRENTS_STORE_NAME = 'Trents Wholesale';
 // in it, edit MAIN_STORES (the names must match the store lists
 // above exactly) - and update the label in MAIN_STORES_OPTION too.
 // -------------------------------------------------------------
-const MAIN_STORES = [TRENTS_STORE_NAME, 'Woolworths Ferrymead', "PAK'nSAVE Wainoni"];
-const MAIN_STORES_OPTION = "Our 3 stores (Trents, Woolworths Ferrymead, PAK'nSAVE Wainoni)";
+// UPDATE, phase 2: which stores are in it is now the is_main_store
+// tick in the stores table, and the label is made from them by
+// loadStores() - e.g. "Our 3 stores (Trents Wholesale, Woolworths
+// Ferrymead, PAK'nSAVE Wainoni)". Tick a fourth and it becomes
+// "Our 4 stores (...)".
+let MAIN_STORES = [];
+let MAIN_STORES_OPTION = 'Our stores';
+
+// Every store row from the database, in dropdown order (preferred
+// stores first). Read once, the first time a page needs it, and kept
+// until the server restarts (the garage restarts it every hour, so a
+// change made in SSMS shows up within the hour).
+let storeRows = null;
+
+async function loadStores() {
+    if (storeRows) return storeRows;
+    const rows = (await database.readRowsAsync('stores')).filter(store => store.is_active);
+
+    rows.forEach(store => {
+        if (store.chain === 'Woolworths') WOOLWORTHS_STORES[store.store_name] = store.store_code;
+        if (store.chain === "PAK'nSAVE") PAKNSAVE_STORES[store.store_name] = store.store_code;
+    });
+    MAIN_STORES = rows.filter(store => store.is_main_store).map(store => store.store_name);
+    MAIN_STORES_OPTION = `Our ${MAIN_STORES.length} stores (${MAIN_STORES.join(', ')})`;
+
+    storeRows = rows;
+    return storeRows;
+}
 
 // -------------------------------------------------------------
 // SUPERMARKET HOME BRANDS - when a price is SAVED (not in the live
@@ -323,54 +358,13 @@ function calculateTrentsUnitPrice(price, sizeText) {
 }
 
 // (parseCSVRows() and parseCSV() - turning CSV text into rows - now
-// live in csv.js, required near the top of this file, so the database
-// migration script can share them.)
-
-// -------------------------------------------------------------
-// Wraps a value in quotes if it contains a comma, quote, or line
-// break - otherwise commas inside the text would be mistaken for
-// column separators when the file is read back later.
-// -------------------------------------------------------------
-function csvField(value) {
-    // A missing value (null/undefined) is saved as a blank field -
-    // otherwise it'd be written into the file as the actual WORD
-    // "null" or "undefined".
-    const str = (value === null || value === undefined) ? '' : String(value);
-    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return '"' + str.replace(/"/g, '""') + '"';
-    }
-    return str;
-}
-
-// -------------------------------------------------------------
-// Turns an array of objects back into CSV text, ready to save
-// to disk. This is the reverse of parseCSV.
-// -------------------------------------------------------------
-// UPDATE: two extra columns on the end (older files without them
-// still read fine - the values just come through blank):
-// - track: "have" = a "have it" item (see HAVE IT ITEMS below),
-//   "amount" = a counted item, blank = decide from its name
-// - low: "yes" if someone's pressed L to mark it as running low
-function stringifyCSV(items) {
-    const header = 'name,quantity,unit,track,low';
-    const rows = items.map(item =>
-        [item.name, item.quantity, item.unit, item.track, item.low].map(csvField).join(',')
-    );
-    return [header, ...rows].join('\n') + '\n';
-}
-
-// -------------------------------------------------------------
-// A generic version of stringifyCSV that works for any headers,
-// not just name/quantity/unit. We need this because recipes.csv
-// and recipe_ingredients.csv have different columns.
-// -------------------------------------------------------------
-function stringifyGenericCSV(headers, items) {
-    const headerRow = headers.join(',');
-    const rows = items.map(item =>
-        headers.map(header => csvField(item[header])).join(',')
-    );
-    return [headerRow, ...rows].join('\n') + '\n';
-}
+// live in csv.js, so the database migration script can share them.)
+//
+// (UPDATE, phase 2: csvField(), stringifyCSV() and stringifyGenericCSV()
+// - which turned lists back into CSV text for saving - were taken out
+// with the CSV files. Everything is saved to the database now; see
+// database.js. writeFileSafely() below stays, for sessions.json and
+// watch_check_status.json, which are still files on the garage.)
 
 // -------------------------------------------------------------
 // Saves text to a file SAFELY. Instead of writing straight over
@@ -441,16 +435,14 @@ function sendText(res, statusCode, message) {
 // - otherwise: the CSV file, exactly as before
 // The rows look the same either way, so nothing else has to care.
 // -------------------------------------------------------------
+// UPDATE, phase 2: always the database now - the CSV side of each of
+// these was taken out when the CSV files were retired. The "file"
+// names (pantry.csv, recipes.csv...) are kept as the names server.js
+// uses for each kind of data; database.js maps each one to its table.
 
-// Reads one "file" and hands back its rows. A missing CSV file is an
-// error here (use readOptionalCsv() for files that might not exist yet).
+// Reads one "file" and hands back its rows.
 function readRows(filePath, callback) {
-    if (database.enabled) return database.readRows(filePath, callback);
-
-    fs.readFile(filePath, 'utf8', (err, data) => {
-        if (err) return callback(err, null);
-        callback(null, parseCSV(data));
-    });
+    database.readRows(filePath, callback);
 }
 
 // The same as readRows(), for code that uses await / Promise.all.
@@ -461,23 +453,21 @@ function readRowsAsync(filePath) {
 }
 
 // Saves a whole list in place of what was there before (like
-// re-writing the whole CSV file). headers is the CSV column order.
-function saveRows(filePath, headers, rows, callback) {
-    if (database.enabled) return database.replaceRows(filePath, rows, err => callback(err));
-    writeFileSafely(filePath, stringifyGenericCSV(headers, rows), callback);
+// re-writing the whole CSV file).
+function saveRows(filePath, rows, callback) {
+    database.replaceRows(filePath, rows, err => callback(err));
 }
 
 // Reads a section's CSV file and hands back the parsed items.
-// (UPDATE: or its rows of the database's inventory table - see readRows.)
+// (UPDATE: its rows of the database's inventory table - see readRows.)
 function readItems(section, callback) {
     readRows(csvFiles[section], callback);
 }
 
 // Saves an array of items back to a section's CSV file.
-// (UPDATE: or the database - see saveRows.)
+// (UPDATE: to the database - see saveRows.)
 function saveItems(section, items, callback) {
-    if (database.enabled) return database.replaceRows(csvFiles[section], items, err => callback(err));
-    writeFileSafely(csvFiles[section], stringifyCSV(items), callback);
+    saveRows(csvFiles[section], items, callback);
 }
 
 // -------------------------------------------------------------
@@ -523,24 +513,14 @@ function readRecipeFilesForEditing(res, callback) {
 // either all saved or none of it, never a recipe with half its
 // ingredients. (Deleting a recipe there also removes its votes and
 // meal plan entries, thanks to ON DELETE CASCADE.)
+// (UPDATE, phase 2: always the database now.)
 function saveRecipeFiles(res, recipes, ingredients, replyData) {
-    if (database.enabled) {
-        return database.saveMany([
-            { file: RECIPES_FILE, rows: recipes },
-            { file: RECIPE_INGREDIENTS_FILE, rows: ingredients }
-        ], err => {
-            if (err) return sendText(res, 500, 'Could not save recipes');
-            sendJson(res, replyData);
-        });
-    }
-
-    writeFileSafely(RECIPES_FILE, stringifyGenericCSV(RECIPE_HEADERS, recipes), (err) => {
+    database.saveMany([
+        { file: RECIPES_FILE, rows: recipes },
+        { file: RECIPE_INGREDIENTS_FILE, rows: ingredients }
+    ], err => {
         if (err) return sendText(res, 500, 'Could not save recipes');
-
-        writeFileSafely(RECIPE_INGREDIENTS_FILE, stringifyGenericCSV(RECIPE_INGREDIENT_HEADERS, ingredients), (err) => {
-            if (err) return sendText(res, 500, 'Could not save recipe ingredients');
-            sendJson(res, replyData);
-        });
+        sendJson(res, replyData);
     });
 }
 
@@ -1419,7 +1399,11 @@ async function searchTrents(searchTerm) {
 // scraper that store belongs to. Used for normal single-store
 // searches, and once per store for "Our 3 stores".
 // -------------------------------------------------------------
-function searchOneStore(searchTerm, storeName) {
+// (UPDATE, phase 2: waits for the store lists to be read from the
+// database first - see loadStores().)
+async function searchOneStore(searchTerm, storeName) {
+    await loadStores();
+
     // The dropdown is one combined list, but each store name
     // still tells us which retailer's scraper to actually run.
     const isPakNSaveStore = Object.prototype.hasOwnProperty.call(PAKNSAVE_STORES, storeName);
@@ -1442,28 +1426,17 @@ function readPrices(callback) {
     readOptionalCsv(PRICES_FILE, callback);
 }
 
-// Saves the FULL price history array back to prices.csv.
-function savePrices(prices, callback) {
-    writeFileSafely(PRICES_FILE, stringifyGenericCSV(PRICE_HEADERS, prices), callback);
-}
-
 // -------------------------------------------------------------
 // Adds NEW prices to the history (every way of saving a price goes
-// through here). Calls back with (err, ids) - the ids the new rows
-// were saved under.
-// - database: just INSERTs the new rows - the rest of the history is
-//   never touched (and the database numbers them 1, 2, 3...)
-// - CSV: reads the whole file, adds them on the end, saves it all
-//   back, same as before
+// through here). It just INSERTs the new rows - the rest of the
+// history is never touched.
+// (UPDATE, phase 2: the CSV version - read the whole file, add them
+// on the end, save it all back - was taken out with the CSV files.
+// Prices also no longer have an id: each one is known by its store,
+// product name and the exact time it was saved.)
 // -------------------------------------------------------------
 function appendPrices(newPrices, callback) {
-    if (newPrices.length === 0) return callback(null, []);
-    if (database.enabled) return database.appendRows(PRICES_FILE, newPrices, callback);
-
-    readPrices((err, prices) => {
-        if (err) return callback(err, null);
-        savePrices(prices.concat(newPrices), err => callback(err, err ? null : newPrices.map(p => p.id)));
-    });
+    database.appendRows(PRICES_FILE, newPrices, callback);
 }
 
 // Reads ingredient_aliases.csv. If it doesn't exist yet (no
@@ -1498,28 +1471,13 @@ let aliasListCache = { modified: null, list: null };
 // thing that changes it) throws it away. An alias added straight
 // into the table in SSMS is picked up at the next restart (the
 // garage restarts the server every hour anyway).
+// (UPDATE, phase 2: the file-time check for the CSV was taken out.)
 function readAllAliases(callback) {
-    if (database.enabled) {
-        if (aliasListCache.list) return callback(null, aliasListCache.list);
-        return readAliases((err, aliases) => {
-            if (err) return callback(err, null);
-            aliasListCache = { modified: 'database', list: aliases.concat(BUILT_IN_ALIAS_LIST) };
-            callback(null, aliasListCache.list);
-        });
-    }
-
-    fs.stat(ALIASES_FILE, (statErr, stats) => {
-        // No file yet (no aliases of your own) counts as "modified: 0".
-        const modified = statErr ? 0 : stats.mtimeMs;
-        if (aliasListCache.list && aliasListCache.modified === modified) {
-            return callback(null, aliasListCache.list);
-        }
-
-        readAliases((err, aliases) => {
-            if (err) return callback(err, null);
-            aliasListCache = { modified, list: aliases.concat(BUILT_IN_ALIAS_LIST) };
-            callback(null, aliasListCache.list);
-        });
+    if (aliasListCache.list) return callback(null, aliasListCache.list);
+    readAliases((err, aliases) => {
+        if (err) return callback(err, null);
+        aliasListCache = { modified: 'database', list: aliases.concat(BUILT_IN_ALIAS_LIST) };
+        callback(null, aliasListCache.list);
     });
 }
 
@@ -1528,7 +1486,7 @@ function readAllAliases(callback) {
 // combined list is thrown away, so the next readAllAliases() re-reads it.)
 function saveAliases(aliases, callback) {
     aliasListCache = { modified: null, list: null };
-    saveRows(ALIASES_FILE, ALIAS_HEADERS, aliases, callback);
+    saveRows(ALIASES_FILE, aliases, callback);
 }
 
 // -------------------------------------------------------------
@@ -1629,11 +1587,26 @@ function loggedInPerson(req) {
 // person's first name, and capitals don't matter ("Todd" / "todd").
 // Gives back the person's name as written in HOUSEHOLD_MEMBERS, or
 // null if it's not a match.
-function checkLogin(username, password) {
+// (UPDATE, phase 2: the names come from the people table now - see
+// readPeople() - so checkLogin() is handed that list.)
+function checkLogin(username, password, householdMembers) {
     const typedName = String(username || '').trim().toLowerCase();
     const typedPassword = String(password || '').trim().toLowerCase();
-    const person = HOUSEHOLD_MEMBERS.find(name => name.toLowerCase() === typedName);
+    const person = householdMembers.find(name => name.toLowerCase() === typedName);
     return person && typedPassword === typedName ? person : null;
+}
+
+// Everyone in the people table, e.g. ['Charlotte', 'Todd', 'Kayleigh'],
+// in the order they were added. Read once and kept until the server
+// restarts (hourly on the garage), so add someone in SSMS and they can
+// log in within the hour.
+let householdMembers = null;
+
+async function readPeople() {
+    if (!householdMembers) {
+        householdMembers = (await database.readRowsAsync('people')).map(person => person.name);
+    }
+    return householdMembers;
 }
 
 // =============================================================
@@ -1682,29 +1655,12 @@ function logActivity(person, rows) {
 
     // With the database switched on, the lines are INSERTed into the
     // activity_log table instead (still only ever added, never changed).
-    if (database.enabled) {
-        const logRows = rows.map(row => ({ ...row, date, time, person }));
-        database.appendRows(ACTIVITY_LOG_FILE, logRows, err => {
-            if (err) console.error('Could not write to the activity log:', err.message);
-        });
-        return;
-    }
-
-    const lines = rows.map(row =>
-        ACTIVITY_LOG_HEADERS.map(header => {
-            if (header === 'date') return csvField(date);
-            if (header === 'time') return csvField(time);
-            if (header === 'person') return csvField(person);
-            return csvField(row[header]);
-        }).join(',')
-    ).join('\n') + '\n';
-
-    // First ever line? Put the column headings at the top first.
-    fs.access(ACTIVITY_LOG_FILE, err => {
-        const text = err ? ACTIVITY_LOG_HEADERS.join(',') + '\n' + lines : lines;
-        fs.appendFile(ACTIVITY_LOG_FILE, text, 'utf8', err => {
-            if (err) console.error('Could not write to the activity log:', err);
-        });
+    // (UPDATE, phase 2: always the database now. The database stamps
+    // each change with its exact time and numbers its lines 1, 2, 3 -
+    // date and time here are only kept for anything reading the rows.)
+    const logRows = rows.map(row => ({ ...row, date, time, person }));
+    database.appendRows(ACTIVITY_LOG_FILE, logRows, err => {
+        if (err) console.error('Could not write to the activity log:', err.message);
     });
 }
 
@@ -1758,14 +1714,9 @@ const STOCK_MINIMUM_HEADERS = ['name', 'minimum', 'unit'];
 // before you've set any) - a missing file just means "nothing yet".
 // (UPDATE: with the database switched on, it reads the matching
 // table instead - an empty table is just an empty list.)
+// (UPDATE, phase 2: always the database now.)
 function readOptionalCsv(filePath, callback) {
-    if (database.enabled) return database.readRows(filePath, callback);
-
-    fs.readFile(filePath, 'utf8', (err, data) => {
-        if (err && err.code === 'ENOENT') return callback(null, []);
-        if (err) return callback(err, null);
-        callback(null, parseCSV(data));
-    });
+    database.readRows(filePath, callback);
 }
 
 // Every minimum, with how much is in the whole house right now
@@ -1864,17 +1815,45 @@ async function lookUpOpenFoodFacts(barcode) {
     if (brand && !name.toLowerCase().startsWith(brand.toLowerCase())) name = `${brand} ${name}`;
 
     const size = sizeFromOpenFoodFacts(data.product.quantity);
-    return { name, quantity: size ? size.quantity : '', unit: size ? size.unit : '' };
+    // (UPDATE, phase 2: brand and product_name are passed back too, so
+    // they can be saved in the barcodes table - see rememberBarcode().)
+    return { name, quantity: size ? size.quantity : '', unit: size ? size.unit : '', brand, product_name: name };
 }
+
+// -------------------------------------------------------------
+// The brand and full product name Open Food Facts gave for each
+// barcode looked up recently, kept until the barcode is saved (the
+// page only sends back the name/amount/place you chose, so this is
+// where rememberBarcode() finds them). Forgotten on restart, which
+// only means a barcode saved after a restart has no brand yet.
+// -------------------------------------------------------------
+const recentBarcodeLookups = new Map();
 
 // Remembers the name/amount/place you used for a barcode, so next
 // time it's filled in straight away (see step 1 above).
-function rememberBarcode(details, callback) {
+// UPDATE, phase 2: also saves, for your own barcode database:
+// - brand and product_name (the full name on the pack) - from Open
+//   Food Facts if it knew the product, otherwise kept from before
+// - source: 'openfoodfacts' (found there) or 'scanned' (you typed the
+//   name in after scanning)
+// - who first added it, and when
+function rememberBarcode(details, person, callback) {
     readOptionalCsv(BARCODES_FILE, (err, barcodes) => {
         if (err) return callback(err);
+        const before = barcodes.find(b => b.barcode === details.barcode) || {};
+        const looked = recentBarcodeLookups.get(details.barcode) || {};
+        recentBarcodeLookups.delete(details.barcode);
+
         const others = barcodes.filter(b => b.barcode !== details.barcode);
-        others.push(details);
-        saveRows(BARCODES_FILE, BARCODE_HEADERS, others, callback);
+        others.push({
+            ...details,
+            brand: looked.brand || before.brand || '',
+            product_name: looked.product_name || before.product_name || '',
+            source: before.source || (looked.product_name ? 'openfoodfacts' : 'scanned'),
+            added_by: before.added_by || person,
+            date_added: before.date_added || nzDateAndTime().date
+        });
+        saveRows(BARCODES_FILE, others, callback);
     });
 }
 
@@ -2541,8 +2520,15 @@ const server = http.createServer((req, res) => {
     // ---- LOGIN: check a username/password, remember this browser ----
     // The only route that works WITHOUT being logged in already.
     if (parsedUrl.pathname === '/login' && req.method === 'POST') {
-        readJsonBody(req, res, ({ username, password }) => {
-            const person = checkLogin(username, password);
+        readJsonBody(req, res, async ({ username, password }) => {
+            // (UPDATE, phase 2: who can log in comes from the people table.)
+            let members;
+            try {
+                members = await readPeople();
+            } catch (err) {
+                return sendText(res, 500, 'Could not check the login - the database did not answer. Try again in a moment.');
+            }
+            const person = checkLogin(username, password, members);
             if (!person) return sendText(res, 401, 'Wrong username or password');
 
             // A long random code that's practically impossible to guess.
@@ -2578,16 +2564,18 @@ const server = http.createServer((req, res) => {
     // ---- Combined store list for the dropdown - one list on the ----
     // ---- page, even though Woolworths and Pak'nSave are handled ----
     // ---- completely separately behind the scenes. ----
+    // (UPDATE, phase 2: the list comes from the stores table - every
+    // active store, preferred ones first - see loadStores().)
     if (parsedUrl.pathname === '/stores' && req.method === 'GET') {
-        const allStoreNames = [
-            // "Our 3 stores" goes FIRST, so it's what's picked by
-            // default when the page opens - see MAIN_STORES.
-            MAIN_STORES_OPTION,
-            ...Object.keys(WOOLWORTHS_STORES),
-            ...Object.keys(PAKNSAVE_STORES),
-            TRENTS_STORE_NAME
-        ];
-        sendJson(res, allStoreNames);
+        loadStores().then(stores => {
+            const allStoreNames = [
+                // "Our 3 stores" goes FIRST, so it's what's picked by
+                // default when the page opens - see MAIN_STORES.
+                MAIN_STORES_OPTION,
+                ...stores.map(store => store.store_name)
+            ];
+            sendJson(res, allStoreNames);
+        }, () => sendText(res, 500, 'Could not read the store list'));
         return;
     }
 
@@ -2610,30 +2598,34 @@ const server = http.createServer((req, res) => {
         // and failedStores tells the page which one didn't.
         // Single-store searches below are unchanged - they still reply
         // with a plain list, so nothing else needs to know about this.
-        if (storeName === MAIN_STORES_OPTION) {
-            Promise.allSettled(MAIN_STORES.map(store => searchOneStore(searchTerm, store)))
-                .then(outcomes => {
-                    const results = [];
-                    const failedStores = [];
-                    outcomes.forEach((outcome, index) => {
-                        if (outcome.status === 'fulfilled') {
-                            results.push(...outcome.value);
-                        } else {
-                            console.error(`Price search failed for ${MAIN_STORES[index]}:`, outcome.reason);
-                            failedStores.push(MAIN_STORES[index]);
-                        }
+        // (UPDATE, phase 2: the store list is read from the database
+        // first, so MAIN_STORES_OPTION is filled in - see loadStores().)
+        loadStores().then(() => {
+            if (storeName === MAIN_STORES_OPTION) {
+                Promise.allSettled(MAIN_STORES.map(store => searchOneStore(searchTerm, store)))
+                    .then(outcomes => {
+                        const results = [];
+                        const failedStores = [];
+                        outcomes.forEach((outcome, index) => {
+                            if (outcome.status === 'fulfilled') {
+                                results.push(...outcome.value);
+                            } else {
+                                console.error(`Price search failed for ${MAIN_STORES[index]}:`, outcome.reason);
+                                failedStores.push(MAIN_STORES[index]);
+                            }
+                        });
+                        sendJson(res, { combined: true, results, failedStores });
                     });
-                    sendJson(res, { combined: true, results, failedStores });
-                });
-            return;
-        }
+                return;
+            }
 
-        searchOneStore(searchTerm, storeName)
-            .then(results => sendJson(res, results))
-            .catch(err => {
-                console.error('Price search failed:', err);
-                sendText(res, 500, `Could not complete the price search - ${storeName || 'the store'} may be slow to respond, or their site has changed. Try again in a moment.`);
-            });
+            searchOneStore(searchTerm, storeName)
+                .then(results => sendJson(res, results))
+                .catch(err => {
+                    console.error('Price search failed:', err);
+                    sendText(res, 500, `Could not complete the price search - ${storeName || 'the store'} may be slow to respond, or their site has changed. Try again in a moment.`);
+                });
+        }, () => sendText(res, 500, 'Could not read the store list'));
         return;
     }
 
@@ -2654,8 +2646,9 @@ const server = http.createServer((req, res) => {
             // Every save is a NEW row - we're keeping full
             // history, not overwriting a previous check of the
             // same item.
+            // (UPDATE, phase 2: no id any more - a saved price is known
+            // by its store, name and the exact time it was saved.)
             const entry = {
-                id: Date.now().toString(),
                 // Home brands renamed + pack size taken off the
                 // name, so it lines up across stores - see
                 // savedPriceName() near the top of this file.
@@ -2672,11 +2665,8 @@ const server = http.createServer((req, res) => {
                 original_name: newPrice.item_name
             };
 
-            appendPrices([entry], (err, ids) => {
+            appendPrices([entry], (err) => {
                 if (err) return sendText(res, 500, 'Could not save price history');
-                // The id it was actually saved under (the database
-                // numbers its own rows).
-                if (ids && ids[0]) entry.id = ids[0];
                 sendJson(res, entry);
             });
         }));
@@ -2795,7 +2785,9 @@ const server = http.createServer((req, res) => {
 
     // ---- List the household members who can vote ----
     if (req.url === '/household-members' && req.method === 'GET') {
-        sendJson(res, HOUSEHOLD_MEMBERS);
+        // (UPDATE, phase 2: from the people table - see readPeople().)
+        readPeople().then(members => sendJson(res, members),
+            () => sendText(res, 500, 'Could not read the household members'));
         return;
     }
 
@@ -2822,7 +2814,7 @@ const server = http.createServer((req, res) => {
                     votes.push({ recipe_id: recipeId, person, vote });
                 }
 
-                saveRows(RECIPE_VOTES_FILE, RECIPE_VOTE_HEADERS, votes, (err) => {
+                saveRows(RECIPE_VOTES_FILE, votes, (err) => {
                     if (err) return sendText(res, 500, 'Could not save recipe votes');
                     sendJson(res, { recipe_id: recipeId, person, vote });
                 });
@@ -3016,7 +3008,7 @@ const server = http.createServer((req, res) => {
                 people: Number(entry.people) || DEFAULT_SERVINGS
             })).filter(entry => entry.day && entry.recipe_id);
 
-            saveRows(MEAL_PLAN_FILE, MEAL_PLAN_HEADERS, rows, err => {
+            saveRows(MEAL_PLAN_FILE, rows, err => {
                 if (err) return sendText(res, 500, 'Could not save the meal plan');
                 sendJson(res, rows);
             });
@@ -3173,7 +3165,6 @@ const server = http.createServer((req, res) => {
                 if (already) return sendJson(res, already);
 
                 const watched = {
-                    id: Date.now().toString(),
                     item_name: product.item_name,
                     store: product.store,
                     package_size: product.package_size || '',
@@ -3181,15 +3172,19 @@ const server = http.createServer((req, res) => {
                     added_by: loggedInAs,
                     date_added: nzDateAndTime().date
                 };
+                // (UPDATE, phase 2: the watch list has no id column any
+                // more - its key is store + product + size. This id is made
+                // from that key, the same way database.js makes it when
+                // reading, so the page can un-star it straight away.)
+                watched.id = database.watchListId(watched);
                 watchList.push(watched);
 
-                saveRows(WATCH_LIST_FILE, WATCH_LIST_HEADERS, watchList, err => {
+                saveRows(WATCH_LIST_FILE, watchList, err => {
                     if (err) return sendText(res, 500, 'Could not save the watch list');
 
                     // (UPDATE: through appendPrices() - see there.)
                     if (product.price === undefined) return sendJson(res, watched);
                     appendPrices([{
-                        id: Date.now().toString(),
                         item_name: savedPriceName(product.item_name, product.store),
                         price: product.price,
                         cup_price: product.cup_price,
@@ -3217,11 +3212,14 @@ const server = http.createServer((req, res) => {
 
     // ---- Watch list: un-star a product ----
     if (req.url.startsWith('/watch-list/') && req.method === 'DELETE') {
-        const watchId = req.url.replace('/watch-list/', '');
+        // (UPDATE, phase 2: the id is made from the store and product
+        // name, so it can contain spaces and apostrophes - the page sends
+        // it encoded for a web address, and this turns it back.)
+        const watchId = decodeURIComponent(req.url.replace('/watch-list/', ''));
         runOneAtATime(res, () => {
             readOptionalCsv(WATCH_LIST_FILE, (err, watchList) => {
                 if (err) return sendText(res, 500, 'Could not read the watch list');
-                saveRows(WATCH_LIST_FILE, WATCH_LIST_HEADERS, watchList.filter(w => w.id !== watchId), err => {
+                saveRows(WATCH_LIST_FILE, watchList.filter(w => w.id !== watchId), err => {
                     if (err) return sendText(res, 500, 'Could not save the watch list');
                     sendJson(res, { removed: watchId });
                 });
@@ -3316,7 +3314,7 @@ const server = http.createServer((req, res) => {
                     const others = minimums.filter(m => m.name.toLowerCase() !== name.toLowerCase());
                     if (amount > 0) others.push({ name, minimum: roundTo2(amount), unit });
 
-                    saveRows(STOCK_MINIMUMS_FILE, STOCK_MINIMUM_HEADERS, others, err => {
+                    saveRows(STOCK_MINIMUMS_FILE, others, err => {
                         if (err) return sendText(res, 500, 'Could not save stock minimums');
                         logActivity(loggedInAs, [amount > 0
                             ? { action: 'Set minimum', item: name, quantity: roundTo2(amount), unit }
@@ -3348,7 +3346,10 @@ const server = http.createServer((req, res) => {
 
             try {
                 const found = await lookUpOpenFoodFacts(barcode);
-                if (found) return sendJson(res, { barcode, ...found, location: '', source: 'openfoodfacts' });
+                if (found) {
+                    recentBarcodeLookups.set(barcode, { brand: found.brand, product_name: found.product_name });
+                    return sendJson(res, { barcode, ...found, location: '', source: 'openfoodfacts' });
+                }
             } catch (err) {
                 // Open Food Facts didn't answer in time, or is down -
                 // treat it the same as "not found".
@@ -3365,7 +3366,7 @@ const server = http.createServer((req, res) => {
             barcode = String(barcode || '').replace(/\D/g, '');
             if (!barcode || !name) return sendText(res, 400, 'Barcode and name are needed');
 
-            rememberBarcode({ barcode, name, quantity, unit, location }, err => {
+            rememberBarcode({ barcode, name, quantity, unit, location }, loggedInAs, err => {
                 if (err) return sendText(res, 500, 'Could not save barcode');
                 sendJson(res, { barcode, name });
             });

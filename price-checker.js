@@ -164,8 +164,12 @@ searchBtn.addEventListener('click', function() {
     // so it's clear it's working, not stuck.
     lastSearchTerm = searchTerm;
 
-    resultsContainer.innerHTML = storeName.startsWith('Our 3 stores')
-        ? `<p>Searching all 3 stores at once - this can take a little longer...</p>`
+    // (UPDATE: the number of "main" stores is set in the database's
+    // stores table now, so the option reads "Our 3 stores (...)",
+    // "Our 4 stores (...)" and so on - this matches any of them.)
+    const mainStoresMatch = storeName.match(/^Our (\d+) stores/);
+    resultsContainer.innerHTML = mainStoresMatch
+        ? `<p>Searching all ${mainStoresMatch[1]} stores at once - this can take a little longer...</p>`
         : `<p>Searching ${storeName}...</p>`;
 
     fetch(`${SERVER_URL}/price-search?item=${encodeURIComponent(searchTerm)}&store=${encodeURIComponent(storeName)}`)
@@ -542,7 +546,10 @@ function renderPriceHistory() {
 
     // IDs are timestamps, so sorting by id descending puts
     // the most recently saved entries at the top.
-    const sorted = [...allSavedPrices].sort((a, b) => Number(b.id) - Number(a.id));
+    // (UPDATE: saved prices don't have an id any more - each one is
+    // known by its store, name and the exact time it was saved - so
+    // this sorts by that time instead, newest first.)
+    const sorted = [...allSavedPrices].sort((a, b) => new Date(b.date_checked) - new Date(a.date_checked));
 
     const filterText = historyFilterInput.value.trim().toLowerCase();
 
