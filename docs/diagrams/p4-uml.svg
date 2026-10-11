@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1250 650" role="img" aria-label="Phase 4 UML class diagram" width="1250" height="650">
+<rect width="1250" height="650" fill="#ffffff"/>
+<path d="M 625.0 280.0 L 625.0 370.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 360.0 414.0 L 460.0 414.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<path d="M 890.0 414.0 L 790.0 414.0" fill="none" stroke="#1c6a84" stroke-width="1.6"/>
+<g>
+<rect x="460" y="30" width="330" height="250" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 460 74 H 790" stroke="#1c6a84" stroke-width="1"/>
+<rect x="460.7" y="30.7" width="328.6" height="42.8" rx="3.5" fill="#e3eff4"/>
+<text x="625.0" y="47" text-anchor="middle" font-size="11" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#5a6d78">&#171;dim_date&#187;</text>
+<text x="625.0" y="65" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">Date</text>
+<text x="470" y="91" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ full_date</text>
+<text x="780" y="91" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">DATE  PK</text>
+<rect x="461" y="97" width="328" height="20" fill="#f4f8fa"/>
+<text x="470" y="111" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ year</text>
+<text x="780" y="111" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">INT</text>
+<text x="470" y="131" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ quarter</text>
+<text x="780" y="131" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">INT</text>
+<rect x="461" y="137" width="328" height="20" fill="#f4f8fa"/>
+<text x="470" y="151" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ month_number</text>
+<text x="780" y="151" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">INT</text>
+<text x="470" y="171" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ month_name</text>
+<text x="780" y="171" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR</text>
+<rect x="461" y="177" width="328" height="20" fill="#f4f8fa"/>
+<text x="470" y="191" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ year_month</text>
+<text x="780" y="191" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">CHAR</text>
+<text x="470" y="211" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ iso_week</text>
+<text x="780" y="211" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">INT</text>
+<rect x="461" y="217" width="328" height="20" fill="#f4f8fa"/>
+<text x="470" y="231" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ day_of_week</text>
+<text x="780" y="231" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">INT</text>
+<text x="470" y="251" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ day_name</text>
+<text x="780" y="251" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR</text>
+<rect x="461" y="257" width="328" height="20" fill="#f4f8fa"/>
+<text x="470" y="271" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ is_weekend</text>
+<text x="780" y="271" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">BIT</text>
+</g>
+<g>
+<rect x="30" y="370" width="330" height="170" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 30 414 H 360" stroke="#1c6a84" stroke-width="1"/>
+<rect x="30.7" y="370.7" width="328.6" height="42.8" rx="3.5" fill="#e3eff4"/>
+<text x="195.0" y="387" text-anchor="middle" font-size="11" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#5a6d78">&#171;dim_store&#187;</text>
+<text x="195.0" y="405" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">Store</text>
+<text x="40" y="431" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ store_name</text>
+<text x="350" y="431" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR  PK</text>
+<rect x="31" y="437" width="328" height="20" fill="#f4f8fa"/>
+<text x="40" y="451" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ chain</text>
+<text x="350" y="451" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR</text>
+<text x="40" y="471" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ suburb</text>
+<text x="350" y="471" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR</text>
+<rect x="31" y="477" width="328" height="20" fill="#f4f8fa"/>
+<text x="40" y="491" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ is_main_store</text>
+<text x="350" y="491" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">BIT</text>
+<text x="40" y="511" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ is_preferred</text>
+<text x="350" y="511" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">BIT</text>
+<rect x="31" y="517" width="328" height="20" fill="#f4f8fa"/>
+<text x="40" y="531" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ is_active</text>
+<text x="350" y="531" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">BIT</text>
+</g>
+<g>
+<rect x="460" y="370" width="330" height="250" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 460 414 H 790" stroke="#1c6a84" stroke-width="1"/>
+<rect x="460.7" y="370.7" width="328.6" height="42.8" rx="3.5" fill="#e3eff4"/>
+<text x="625.0" y="387" text-anchor="middle" font-size="11" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#5a6d78">&#171;vw_fact_price&#187;</text>
+<text x="625.0" y="405" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">PriceCheck</text>
+<text x="470" y="431" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ full_date</text>
+<text x="780" y="431" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">DATE  FK</text>
+<rect x="461" y="437" width="328" height="20" fill="#f4f8fa"/>
+<text x="470" y="451" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ store_name</text>
+<text x="780" y="451" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR  FK</text>
+<text x="470" y="471" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ product_name</text>
+<text x="780" y="471" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR  FK</text>
+<rect x="461" y="477" width="328" height="20" fill="#f4f8fa"/>
+<text x="470" y="491" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ checked_at_nz</text>
+<text x="780" y="491" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">DATETIME2</text>
+<text x="470" y="511" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ price</text>
+<text x="780" y="511" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">DECIMAL</text>
+<rect x="461" y="517" width="328" height="20" fill="#f4f8fa"/>
+<text x="470" y="531" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ cup_price</text>
+<text x="780" y="531" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">DECIMAL</text>
+<text x="470" y="551" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ cup_measure</text>
+<text x="780" y="551" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR</text>
+<rect x="461" y="557" width="328" height="20" fill="#f4f8fa"/>
+<text x="470" y="571" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ package_size</text>
+<text x="780" y="571" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR</text>
+<text x="470" y="591" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ original_name</text>
+<text x="780" y="591" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR</text>
+<rect x="461" y="597" width="328" height="20" fill="#f4f8fa"/>
+<text x="470" y="611" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ change_since_last_check</text>
+<text x="780" y="611" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">DECIMAL</text>
+</g>
+<g>
+<rect x="890" y="370" width="330" height="210" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
+<path d="M 890 414 H 1220" stroke="#1c6a84" stroke-width="1"/>
+<rect x="890.7" y="370.7" width="328.6" height="42.8" rx="3.5" fill="#e3eff4"/>
+<text x="1055.0" y="387" text-anchor="middle" font-size="11" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#5a6d78">&#171;dim_product&#187;</text>
+<text x="1055.0" y="405" text-anchor="middle" font-size="14" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">Product</text>
+<text x="900" y="431" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ product_name</text>
+<text x="1210" y="431" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR  PK</text>
+<rect x="891" y="437" width="328" height="20" fill="#f4f8fa"/>
+<text x="900" y="451" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ is_home_brand</text>
+<text x="1210" y="451" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">BIT</text>
+<text x="900" y="471" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ first_checked</text>
+<text x="1210" y="471" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">DATE</text>
+<rect x="891" y="477" width="328" height="20" fill="#f4f8fa"/>
+<text x="900" y="491" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ last_checked</text>
+<text x="1210" y="491" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">DATE</text>
+<text x="900" y="511" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ times_checked</text>
+<text x="1210" y="511" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">INT</text>
+<rect x="891" y="517" width="328" height="20" fill="#f4f8fa"/>
+<text x="900" y="531" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ stores_checked</text>
+<text x="1210" y="531" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">INT</text>
+<text x="900" y="551" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ latest_original_name</text>
+<text x="1210" y="551" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR</text>
+<rect x="891" y="557" width="328" height="20" fill="#f4f8fa"/>
+<text x="900" y="571" font-size="12.5" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">+ latest_package_size</text>
+<text x="1210" y="571" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">NVARCHAR</text>
+</g>
+<text x="614.0" y="310.0" text-anchor="middle" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c" font-weight="600">1</text>
+<text x="636.0" y="348.0" text-anchor="middle" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c" font-weight="600">0..*</text>
+<text x="386.0" y="429.0" text-anchor="middle" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c" font-weight="600">1</text>
+<text x="434.0" y="407.0" text-anchor="middle" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c" font-weight="600">0..*</text>
+<text x="864.0" y="407.0" text-anchor="middle" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c" font-weight="600">1</text>
+<text x="816.0" y="429.0" text-anchor="middle" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c" font-weight="600">0..*</text>
+</svg>

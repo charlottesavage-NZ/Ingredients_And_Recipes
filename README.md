@@ -64,6 +64,7 @@ This is intended to help with a couple of issues:
   - Recipes save with `MERGE`, and their ingredients, votes and meal-plan entries are linked by foreign keys with `ON DELETE CASCADE`.
   - Prices and the activity log are insert-only, so the full history is kept line by line.
   - Saves still go through a one-at-a-time queue, so two people saving at once can't overwrite each other.
+- **Price reports use a star schema.** Views in a separate `reporting` schema (`vw_fact_price`, `dim_store`, `dim_product`, `dim_date`, plus `vw_latest_price`) let a tool like Power BI chart prices by store, by chain and over time, through a read-only `pantry_reports` login. See `database/reporting-views.sql`.
 - **The CSV files are retired.** The site needs `database-config.js` and stops with a clear message without it. The old CSV files are kept on the garage as an archive.
 - **The store list and who can log in live in the database.** Adding a store (with its cookie value or store ID as `store_code`) or a person is one `INSERT` in SSMS, picked up within the hour.
 - **The free database pauses itself when idle**, and its awake time counts against a monthly allowance. So the server never connects at start-up (it restarts every hour), closes idle connections after 30 seconds, and waits and retries while a paused database wakes up.
@@ -79,6 +80,8 @@ This is intended to help with a couple of issues:
 | `database/phase2-upgrade.sql` | One-off upgrade of the live database from the phase 1 tables to phase 2 |
 | `database/ingredients-upgrade.sql` | One-off upgrade from phase 2 to phase 3: the ingredients table, built-in aliases and tin sizes moved in, every name linked |
 | `database/seed-ingredients.sql` | The built-in ingredients and aliases, for a new database (run after `create-tables.sql`) |
+| `database/reporting-views.sql` | The star schema views for price reports (safe to re-run) |
+| `database/reports-login.sql` | Creates the read-only `pantry_reports` login for Power BI |
 | `database/migrate-csv-to-database.js` | Copies every CSV file into a database (now for filling a test database from the archived CSVs) |
 | `database/check-migration.sql` | Queries to check the data is all there |
 | `docs/database-design.md` | The database design, with crow's foot and UML diagrams |
@@ -183,3 +186,13 @@ Same pattern as phase 2 - the tables and the code change together.
 6. In SSMS, run `database/check-migration.sql`, and try the site.
 
 (Done on 12 October 2026: 483 ingredients, 622 aliases, every stock row and recipe ingredient linked.)
+
+### Price reports: the star schema views (phase 4)
+
+Views only - the website keeps running and nothing changes in the tables.
+
+1. In SSMS, right-click **pantry -> New Query** (the yellow bar must say `pantry`), paste in `database/reporting-views.sql` and run it. It ends with a row count for each view.
+2. Open `database/reports-login.sql`, put a new strong password in place of the placeholder, and run it the same way. Keep the password in your password manager.
+3. Connect Power BI Desktop: **Get data -> Azure SQL database**, server `charlotte-inventory2.database.windows.net`, database `pantry`, **Import**, then **Database** credentials `pantry_reports`. Load the five `reporting` views, join `vw_fact_price` to the three dimensions on `full_date`, `store_name` and `product_name`, and mark `dim_date` as the date table. Your PC's IP address has to be allowed in the Azure firewall.
+
+Import mode only reads the database when you press Refresh, so reports barely touch the free monthly allowance. `docs/database-design.md` has the star diagram.

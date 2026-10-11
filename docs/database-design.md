@@ -2,6 +2,7 @@
 
 The household data lives in the Azure SQL database `pantry` on `charlotte-inventory2.database.windows.net`. This page documents each version of the design, each as a crow's foot entity-relationship diagram and a UML class diagram:
 
+- **Phase 4** - star schema views for price reports (made by [`database/reporting-views.sql`](../database/reporting-views.sql))
 - **Phase 3** - the ingredients table, live since 12 October 2026 (made by [`database/ingredients-upgrade.sql`](../database/ingredients-upgrade.sql))
 - **Phase 2** - people, stores and locations, natural and composite keys (made by [`database/phase2-upgrade.sql`](../database/phase2-upgrade.sql))
 - **Phase 1** - the tables first moved off the CSV files
@@ -39,6 +40,28 @@ Read across the line, using the number at the far end. Store 1 to Price 0..* mea
 ![Dashed arrow: "looked up by name"](diagrams/uml-dependency.svg)
 
 No foreign key - the website code finds the matching row by comparing names, and the arrow points at the table being looked up. After phase 3 only one is left: a watched product's price history.
+
+## Phase 4: star schema for price reports
+
+- Views only, in their own reporting schema - nothing is copied, so reports always see the latest prices. The website doesn't use them.
+- vw_fact_price is the fact: one row per saved price, with its NZ date, store, product, prices, size, and change_since_last_check (the difference from that product's previous price at that store).
+- dim_store, dim_product and dim_date are the dimensions to slice by: store and chain, product (home brand or not), and the NZ calendar (year, quarter, month, ISO week, weekday, weekend).
+- Keys stay natural: store_name, product_name and the date itself.
+- vw_latest_price is an extra view outside the star: the newest price for each product at each store, ranked so cheapest_rank = 1 is the cheapest store right now.
+- A read-only login, pantry_reports, can see only the reporting views - it's the one to give Power BI.
+
+![Phase 4 star schema - crow's foot diagram](diagrams/p4-er.svg)
+
+![Phase 4 star schema - UML class diagram](diagrams/p4-uml.svg)
+
+### Connecting Power BI
+
+1. In Power BI Desktop (free, Windows): Get data -> Azure SQL database.
+2. Server: charlotte-inventory2.database.windows.net, Database: pantry, Data connectivity: Import.
+3. Sign in with Database credentials: pantry_reports and its password.
+4. Tick the five reporting views and Load.
+5. In Model view, join vw_fact_price.full_date to dim_date.full_date, store_name to dim_store, product_name to dim_product (Power BI usually finds these itself), and mark dim_date as the date table.
+6. Import mode only reads the database when you press Refresh, so it barely touches the free monthly allowance.
 
 ## Phase 3: the ingredients table
 
@@ -103,6 +126,3 @@ The tables as first moved off the CSV files on 11 October 2026. Each mirrored on
 
 ![Phase 1 UML class diagram](diagrams/p1-uml.svg)
 
-## Next
-
-Phase 4: a star schema for price reports - views over the prices table such as vw_fact_price, dim_product, dim_store and dim_date - so a tool like Power BI can chart prices by store, by chain and over time.
