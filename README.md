@@ -181,3 +181,5 @@ Same pattern as phase 2 - the tables and the code change together.
 4. Push the phase 3 code from your PC, then run update-pantry on the garage.
 5. `systemctl start ingredients-recipes-update.timer`.
 6. In SSMS, run `database/check-migration.sql`, and try the site.
+
+(Done on 12 October 2026: 483 ingredients, 622 aliases, every stock row and recipe ingredient linked.)

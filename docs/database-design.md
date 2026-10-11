@@ -2,7 +2,7 @@
 
 The household data lives in the Azure SQL database `pantry` on `charlotte-inventory2.database.windows.net`. This page documents each version of the design, each as a crow's foot entity-relationship diagram and a UML class diagram:
 
-- **Phase 3** - the ingredients table (made by [`database/ingredients-upgrade.sql`](../database/ingredients-upgrade.sql))
+- **Phase 3** - the ingredients table, live since 12 October 2026 (made by [`database/ingredients-upgrade.sql`](../database/ingredients-upgrade.sql))
 - **Phase 2** - people, stores and locations, natural and composite keys (made by [`database/phase2-upgrade.sql`](../database/phase2-upgrade.sql))
 - **Phase 1** - the tables first moved off the CSV files
 
