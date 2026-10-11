@@ -50,19 +50,31 @@ This is intended to help with a couple of issues:
 
 **Behind the scenes**
 - A simple first-name login, remembered per browser for a year.
-- An activity log (`activity_log.csv`) of who changed what, e.g. "Todd, Used (I made this), Mince, 500 g, Fridge".
-- A nightly backup of all the data.
+- An activity log of who changed what, e.g. "Todd, Used (I made this), Mince, 500 g, Fridge".
+- Backups of all the data (Azure's automatic database backups, plus a nightly backup on the garage).
 
 ## How it's built
 
 - **No framework.** Plain HTML, CSS and JavaScript pages, and one Node.js server (`server.js`) using Node's built-in `http` module.
-- **Data is stored in CSV files** (one per storage area, recipes, prices and so on). Every save goes through a one-at-a-time queue and a write-to-temp-then-rename step, so two people saving at once, or a restart mid-save, can't corrupt a file. Moving to PostgreSQL is planned.
+- **Data is stored in an Azure SQL Database** (Microsoft SQL Server in the cloud, on the free offer). There are 11 tables, one for each kind of data: inventory, recipes, recipe ingredients, votes, aliases, prices, the activity log, stock minimums, barcodes, the meal plan and the watch list. See `database/create-tables.sql`.
+  - Each save is one T-SQL batch in a single transaction. The rows are sent as JSON and unpacked with `OPENJSON`, so a save is all-or-nothing.
+  - Recipes save with `MERGE`, and their ingredients, votes and meal-plan entries are linked by foreign keys with `ON DELETE CASCADE`.
+  - Prices and the activity log are insert-only, so the full history is kept line by line.
+  - Saves still go through a one-at-a-time queue, so two people saving at once can't overwrite each other.
+- **The CSV files are still supported as a fallback.** The site only uses the database when `database-config.js` exists. Without it, it reads and writes the original CSV files exactly as before. Deleting the config file switches straight back.
+- **The free database pauses itself when idle**, and its awake time counts against a monthly allowance. So the server never connects at start-up (it restarts every hour), closes idle connections after 30 seconds, and waits and retries while a paused database wakes up.
 - **The supermarket scrapers use [Playwright](https://playwright.dev)**. They open a real Chromium browser, run the search on the store's own website, and read the prices out of the website's own data requests. Trents needs a real account login.
 - **Recipe import** reads the hidden `schema.org/Recipe` data that recipe websites embed for Google. It then converts each ingredient line ("1 1/2 cups plain flour") into the app's name / quantity / unit format.
 
 | File | What it is |
 |---|---|
-| `server.js` | The whole back end: data files, login, scrapers, recipe import, meal plan, watch list |
+| `server.js` | The whole back end: reading and saving data, login, scrapers, recipe import, meal plan, watch list |
+| `database.js` | Everything that talks to Azure SQL: which table each kind of data lives in, reads, transactional saves, retries |
+| `csv.js` | Reads CSV files (shared by `server.js` and the migration script) |
+| `database/create-tables.sql` | Creates all the tables. Run once in SSMS with the admin login |
+| `database/migrate-csv-to-database.js` | One-off copy of every CSV file into the database |
+| `database/check-migration.sql` | Queries to check the copy worked |
+| `database-config.example.js` | What the real (gitignored) `database-config.js` looks like |
 | `ingredient-data.js` | Built-in ingredient aliases (US to NZ names etc.) and tin sizes |
 | `index.html` / `script.js` | Inventory page |
 | `recipes.html` / `recipes.js` | Recipes page |
@@ -94,7 +106,9 @@ module.exports = {
 };
 ```
 
-**2. The data files.** Each one needs at least its header row. The rest are created automatically when first used.
+**2. Where the data goes.** Locally, you'd normally leave out `database-config.js` so the site uses CSV files in this folder. Only create it if you want to test against Azure SQL, and remember that's the **real** household data (your computer's IP address also has to be allowed in the Azure SQL server's firewall).
+
+For CSV mode, each data file needs at least its header row. The rest are created automatically when first used.
 
 | File | Header row |
 |---|---|
@@ -103,7 +117,7 @@ module.exports = {
 | `recipe_ingredients.csv` | `recipe_id,ingredient_name,quantity,unit` |
 | `recipe_votes.csv` | `recipe_id,person,vote` |
 
-Created automatically: `prices.csv`, `ingredient_aliases.csv`, `stock_minimums.csv`, `barcodes.csv`, `meal_plan.csv`, `watch_list.csv`, `activity_log.csv`, `sessions.json`, `watch_check_status.json`.
+`server.js` creates these itself the first time they're needed: `prices.csv`, `ingredient_aliases.csv`, `stock_minimums.csv`, `barcodes.csv`, `meal_plan.csv`, `watch_list.csv`, `activity_log.csv`, `sessions.json`, `watch_check_status.json`.
 
 **3. `dev-server.js`** is a small local-only launcher. On the real server a web server sits in front of `server.js`: it serves the pages and passes anything starting with `/recipes/` through to `server.js` (port 3000) with that prefix removed. `dev-server.js` does the same job on port 8080 and starts `server.js` for you:
 
@@ -115,9 +129,27 @@ Then open <http://localhost:8080>. The login is a household member's first name 
 
 ## How it runs at home
 
-The live copy runs on a small Linux server in the garage, at `/opt/Ingredients_And_Recipes`, set up with systemd:
+The live copy runs on a small Linux server in the garage, at `/opt/Ingredients_And_Recipes`, set up with systemd. Its data lives in Azure SQL:
+
+- **The database** is `pantry` on the Azure SQL server `charlotte-inventory2.database.windows.net` (Australia East, free offer, auto-pauses when idle).
+  - The site connects as `pantry_app`, a login that can only read and change data.
+  - The admin login is only used in SSMS, for changing tables.
+  - The connection details are in `database-config.js` on the garage only (gitignored, `chmod 600`).
+- **The Azure firewall** only lets in the garage's internet address (and the PC used for SSMS). If the home internet address changes, the site's log says Azure blocked the IP. Add the new address under the SQL server's *Security → Networking* in the Azure portal.
 
 - **`ingredients-recipes.service`** runs `server.js`. It runs under `xvfb-run`, which gives the scrapers' browser a virtual screen. A web server in front of it serves the pages and proxies `/recipes/` to it.
 - **`ingredients-recipes-update.timer`** deploys every hour. It fetches from GitHub, runs `git reset --hard origin/main` and `git clean -fd`, then restarts the service. Because the data files are gitignored, a deploy never touches them.
-- **`pantry-backup.timer`** runs `backup-data.sh` every night at 3am. It zips every data file into `/opt/pantry-backups/pantry-YYYY-MM-DD.tar.gz` and keeps 30 days. Restore steps are at the top of the script.
+- **`pantry-backup.timer`** runs `backup-data.sh` every night at 3am. Since the move to Azure SQL, the database itself is backed up automatically by Azure. This script still backs up `sessions.json` (who's logged in) and the old CSV files, but it doesn't back up the database. It zips every data file into `/opt/pantry-backups/pantry-YYYY-MM-DD.tar.gz` and keeps 30 days. Restore steps are at the top of the script.
 - **The watch list's morning price check** runs inside `server.js` itself, from 7am NZ time. It needs no extra timer.
+
+### Moving the garage from CSV files to the database (one-off)
+
+1. In SSMS (admin login, `pantry` database), run `database/create-tables.sql`.
+2. On the garage, stop the hourly update: `systemctl stop ingredients-recipes-update.timer`.
+3. Copy the CSVs somewhere safe: `mkdir -p /root/csv-backup && cp /opt/Ingredients_And_Recipes/*.csv /root/csv-backup/`.
+4. Create `/opt/Ingredients_And_Recipes/database-config.js` from `database-config.example.js` with the `pantry_app` password, then `chmod 600` it.
+5. `systemctl stop ingredients-recipes`, then from the project folder run `node database/migrate-csv-to-database.js`. It copies every CSV in one transaction and prints each file's row count next to its table's row count.
+6. `systemctl start ingredients-recipes && systemctl start ingredients-recipes-update.timer`.
+7. In SSMS, run `database/check-migration.sql` to see the data.
+
+To go back to the CSV files, delete `database-config.js` and restart the service. Anything changed while it was on the database is only in the database.
