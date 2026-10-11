@@ -4,29 +4,37 @@ The household data lives in the Azure SQL database `pantry` on `charlotte-invent
 
 GitHub draws the diagrams below automatically. The table definitions themselves are in [`database/create-tables.sql`](../database/create-tables.sql).
 
-## Reading the diagrams
+## Reading the UML diagrams
 
-**Crow's foot (ER) diagrams**
+**Each box is one table**
 
-| Symbol | Means |
-|---|---|
-| `||` | exactly one |
-| `|o` | zero or one |
-| `}o` | zero or many |
-| `}|` | one or many |
-| `solid line` | a real foreign key the database enforces |
-| `dotted line` | matched by name in the code, no foreign key yet (the ingredients table fixes these) |
+![Each box is one table](diagrams/uml-class.svg)
 
-**UML class diagrams**
+The small name in angle brackets at the top, like <<inventory>>, is the real SQL table. The bigger name under it is a friendly name for one row of that table. Each line below is one column: the SQL type, the column name, then PK (part of the primary key), FK (points at another table) or UNIQUE. The + at the start of each line is standard UML decoration and can be ignored.
 
-| Symbol | Means |
-|---|---|
-| `*--` | composition: the child rows belong to the recipe and are deleted with it (ON DELETE CASCADE) |
-| `--` | association: a foreign key |
-| `..>` | dependency: looked up by name in the code |
-| `"1", "0..1", "0..*"` | multiplicity: exactly one, optional, any number |
-| `<<recipes>>` | the SQL table behind the class |
-| `PK / FK / UNIQUE` | primary key, foreign key, unique column |
+**Filled diamond: "belongs to"**
+
+![Filled diamond: "belongs to"](diagrams/uml-composition.svg)
+
+The diamond sits on the owner. Recipe ingredients belong to their recipe, so deleting a recipe deletes its ingredients too (ON DELETE CASCADE). Used for recipe ingredients, votes and meal plan entries.
+
+**Plain line: "points at"**
+
+![Plain line: "points at"](diagrams/uml-association.svg)
+
+One table refers to another with a foreign key, and the database refuses a row that points at something missing. Nothing is deleted automatically.
+
+**Numbers at the ends: "how many"**
+
+![Numbers at the ends: "how many"](diagrams/uml-optional.svg)
+
+Read across the line, using the number at the far end. Store 1 to Price 0..* means one store has any number of prices, and each price is at exactly 1 store. 1 = exactly one. 0..1 = none or one (optional, e.g. a log line with nobody logged in). 0..* = any number, including none.
+
+**Dashed arrow: "looked up by name"**
+
+![Dashed arrow: "looked up by name"](diagrams/uml-dependency.svg)
+
+There is no foreign key yet. The website code finds the matching row by comparing names, and the arrow points at the table being looked up. The ingredients table, planned after phase 2, turns these into real links.
 
 ## Phase 1: live now (since 11 October 2026)
 
@@ -34,17 +42,18 @@ Each table mirrors one of the old CSV files. Only recipes are linked by foreign 
 
 ### Crow's foot diagram
 
+Dotted lines are matched by name in the website code, not by a foreign key.
+
 ```mermaid
 erDiagram
-    recipes ||--o{ recipe_ingredients : "has"
-    recipes ||--o{ recipe_votes : "receives"
-    recipes ||--o{ meal_plan : "is planned in"
-    recipe_ingredients }o..o{ inventory : "matched by name"
-    ingredient_aliases }o..o{ recipe_ingredients : "renames"
-    stock_minimums }o..o{ inventory : "compared by name"
-    barcodes }o..o{ inventory : "fills in Add Item"
-    watch_list |o..o{ prices : "history by store and name"
-
+    recipes ||--o{ recipe_ingredients : ""
+    recipes ||--o{ recipe_votes : ""
+    recipes ||--o{ meal_plan : ""
+    recipe_ingredients }o..o{ inventory : ""
+    ingredient_aliases }o..o{ recipe_ingredients : ""
+    stock_minimums }o..o{ inventory : ""
+    barcodes }o..o{ inventory : ""
+    watch_list |o..o{ prices : ""
     inventory {
         bigint id PK
         nvarchar(10) location UK "pantry, fridge, freezer or chest"
@@ -225,14 +234,14 @@ classDiagram
         +NVARCHAR location
         +NVARCHAR details
     }
-    Recipe "1" *-- "0..*" RecipeIngredient : has
-    Recipe "1" *-- "0..*" RecipeVote : receives
-    Recipe "1" *-- "0..*" MealPlanEntry : planned in
-    RecipeIngredient ..> InventoryItem : matched by name
-    RecipeIngredient ..> IngredientAlias : name looked up
-    StockMinimum ..> InventoryItem : compared by name
-    Barcode ..> InventoryItem : fills in Add Item
-    WatchedProduct ..> Price : history by store and name
+    Recipe "1" *-- "0..*" RecipeIngredient
+    Recipe "1" *-- "0..*" RecipeVote
+    Recipe "1" *-- "0..*" MealPlanEntry
+    RecipeIngredient ..> InventoryItem
+    RecipeIngredient ..> IngredientAlias
+    StockMinimum ..> InventoryItem
+    Barcode ..> InventoryItem
+    WatchedProduct ..> Price
 ```
 
 ## Phase 2: proposed
@@ -246,45 +255,47 @@ Adds `people`, `stores` and `locations`, and links the other tables to them.
 - watch_list loses its Date.now() id, so the Price Checker page will remove a watched product by store, name and size instead.
 - The CSV fallback is retired in phase 2. The old CSV files stay on the garage and in /root/csv-backup-2026-10-11 as an archive.
 
-### Primary keys
+### Every table and its columns
 
-| Table | Primary key | Why |
-|---|---|---|
-| `people` | `person_id (INT IDENTITY)` | The only number id. Renaming someone changes one row, and their votes, log lines and watched products follow. |
-| `stores` | `store_name` | The name the scrapers, the store dropdown and the price history already use, e.g. Woolworths Ferrymead. |
-| `locations` | `location_code` | Short fixed codes: pantry, fridge, freezer, chest. |
-| `inventory` | `location_code + name + unit` | One row per thing, per place, per unit. The site already enforces this rule when it merges stock. |
-| `recipes` | `recipe_id` | The existing text code (from Date.now() when added), so nothing the pages already know changes. |
-| `recipe_ingredients` | `recipe_id + line_no` | Line 1, 2, 3 of the recipe. Keeps the ingredient order, and allows the same ingredient twice (salt in the sauce and in the marinade). |
-| `recipe_votes` | `recipe_id + person_id` | One vote per person per recipe. |
-| `meal_plan` | `day + recipe_id` | A recipe can be planned once per day. |
-| `ingredient_aliases` | `alias` | Each alternative name points to one main name. |
-| `prices` | `store_name + item_name + date_checked` | One price per product, per store, per moment. Full history, never updated. |
-| `activity_log` | `logged_at + line_no` | The exact time of a change, plus line 1, 2, 3 for changes that log several rows at once (I made this). |
-| `stock_minimums` | `name + unit` | One minimum per item and unit. |
-| `barcodes` | `barcode` | The barcode number itself. |
-| `watch_list` | `store_name + item_name + package_size` | The same rule the site already uses to stop the same product being starred twice. |
+| Table | Primary key | Other columns | Why that key |
+|---|---|---|---|
+| `people` | `person_id (INT IDENTITY)` | name | The only number id. Every other table stores person_id, never the name, so renaming someone changes one row. |
+| `stores` | `store_name` | chain, suburb, store_code, is_main_store, is_preferred, is_active | The name the scrapers, the store dropdown and the price history already use, e.g. Woolworths Ferrymead. |
+| `locations` | `location_code` | location_name, storage_type, sort_order | Short fixed codes (pantry, fridge, freezer, chest), with the friendly name beside each. |
+| `inventory` | `location_code + name + unit` | quantity, track, low | One row per thing, per place, per unit. The site already enforces this rule when it merges stock. |
+| `recipes` | `recipe_id` | name, instructions, servings | The existing text code (from Date.now() when added), so nothing the pages already know changes. |
+| `recipe_ingredients` | `recipe_id + line_no` | ingredient_name, quantity, unit | Line 1, 2, 3 of the recipe. Keeps the ingredient order, and allows the same ingredient twice (salt in the sauce and in the marinade). |
+| `recipe_votes` | `recipe_id + person_id` | vote | One vote per person per recipe. |
+| `meal_plan` | `day + recipe_id` | people | A recipe can be planned once per day. |
+| `ingredient_aliases` | `alias` | canonical_name | Each alternative name points to one main name. |
+| `prices` | `store_name + item_name + date_checked` | price, cup_price, cup_measure, package_size, original_name | One price per product, per store, per moment. Full history, never updated. |
+| `activity_log` | `logged_at + line_no` | person_id, action, item, quantity, unit, location_code, details | The exact time of a change, plus line 1, 2, 3 for changes that log several rows at once (I made this). |
+| `stock_minimums` | `name + unit` | minimum | One minimum per item and unit. |
+| `barcodes` | `barcode` | item_name, brand, product_name, quantity, unit, location_code, source, added_by_person_id, date_added | Your own barcode database: the number under the bars, with your name for the product, its brand and its full name. |
+| `watch_list` | `store_name + item_name + package_size` | search_term, added_by_person_id, date_added | The same rule the site already uses to stop the same product being starred twice. |
 
 ### Crow's foot diagram
 
+Dotted lines are matched by name in the website code, not by a foreign key.
+
 ```mermaid
 erDiagram
-    people ||--o{ recipe_votes : "casts"
-    people |o--o{ activity_log : "made"
-    people ||--o{ watch_list : "added"
-    stores ||--o{ prices : "price seen at"
-    stores ||--o{ watch_list : "watched at"
-    locations ||--o{ inventory : "holds"
-    locations |o--o{ barcodes : "usually goes in"
-    locations |o--o{ activity_log : "happened in"
-    recipes ||--o{ recipe_ingredients : "has"
-    recipes ||--o{ recipe_votes : "receives"
-    recipes ||--o{ meal_plan : "is planned in"
-    recipe_ingredients }o..o{ inventory : "matched by name"
-    ingredient_aliases }o..o{ recipe_ingredients : "renames"
-    stock_minimums }o..o{ inventory : "compared by name"
-    watch_list |o..o{ prices : "history by store and name"
-
+    people ||--o{ recipe_votes : ""
+    people |o--o{ activity_log : ""
+    people ||--o{ watch_list : ""
+    people |o--o{ barcodes : ""
+    stores ||--o{ prices : ""
+    stores ||--o{ watch_list : ""
+    locations ||--o{ inventory : ""
+    locations |o--o{ barcodes : ""
+    locations |o--o{ activity_log : ""
+    recipes ||--o{ recipe_ingredients : ""
+    recipes ||--o{ recipe_votes : ""
+    recipes ||--o{ meal_plan : ""
+    recipe_ingredients }o..o{ inventory : ""
+    ingredient_aliases }o..o{ recipe_ingredients : ""
+    stock_minimums }o..o{ inventory : ""
+    watch_list |o..o{ prices : ""
     people {
         int person_id PK "the only number id"
         nvarchar(50) name UK "Charlotte, Todd, Kayleigh"
@@ -292,12 +303,16 @@ erDiagram
     stores {
         nvarchar(100) store_name PK "e.g. Woolworths Ferrymead"
         nvarchar(50) chain "Woolworths, PAKnSAVE or Trents"
+        nvarchar(50) suburb "e.g. Ferrymead"
         nvarchar(200) store_code "cookie or store ID the scraper uses"
         bit is_main_store "in the Our 3 stores search"
+        bit is_preferred "shown first, used for best price"
+        bit is_active "still searched"
     }
     locations {
         nvarchar(10) location_code PK "pantry, fridge, freezer, chest"
-        nvarchar(50) display_name "e.g. Freezer (Inside)"
+        nvarchar(50) location_name "e.g. Freezer (Inside)"
+        nvarchar(10) storage_type "cupboard, chilled or frozen"
         int sort_order
     }
     inventory {
@@ -362,11 +377,16 @@ erDiagram
         decimal minimum
     }
     barcodes {
-        nvarchar(50) barcode PK
-        nvarchar(200) name
-        decimal quantity
+        nvarchar(50) barcode PK "number under the bars"
+        nvarchar(200) item_name "your name for it, e.g. Tinned Tomatoes"
+        nvarchar(100) brand "e.g. Watties"
+        nvarchar(300) product_name "full name on the pack"
+        decimal quantity "pack size"
         nvarchar(20) unit
-        nvarchar(10) location_code FK
+        nvarchar(10) location_code FK "where it usually goes"
+        nvarchar(20) source "scanned, openfoodfacts or typed"
+        int added_by_person_id FK
+        date date_added
     }
     watch_list {
         nvarchar(100) store_name PK, FK
@@ -392,13 +412,17 @@ classDiagram
         <<stores>>
         +NVARCHAR store_name PK
         +NVARCHAR chain
+        +NVARCHAR suburb
         +NVARCHAR store_code
         +BIT is_main_store
+        +BIT is_preferred
+        +BIT is_active
     }
     class Location {
         <<locations>>
         +NVARCHAR location_code PK
-        +NVARCHAR display_name
+        +NVARCHAR location_name
+        +NVARCHAR storage_type
         +INT sort_order
     }
     class Recipe {
@@ -451,10 +475,15 @@ classDiagram
     class Barcode {
         <<barcodes>>
         +NVARCHAR barcode PK
-        +NVARCHAR name
+        +NVARCHAR item_name
+        +NVARCHAR brand
+        +NVARCHAR product_name
         +DECIMAL quantity
         +NVARCHAR unit
         +NVARCHAR location_code FK
+        +NVARCHAR source
+        +INT added_by_person_id FK
+        +DATE date_added
     }
     class Price {
         <<prices>>
@@ -488,21 +517,22 @@ classDiagram
         +NVARCHAR location_code FK
         +NVARCHAR details
     }
-    Recipe "1" *-- "0..*" RecipeIngredient : has
-    Recipe "1" *-- "0..*" RecipeVote : receives
-    Recipe "1" *-- "0..*" MealPlanEntry : planned in
-    Person "1" -- "0..*" RecipeVote : casts
-    Person "0..1" -- "0..*" ActivityLogEntry : made
-    Person "1" -- "0..*" WatchedProduct : added
-    Store "1" -- "0..*" Price : price seen at
-    Store "1" -- "0..*" WatchedProduct : watched at
-    Location "1" -- "0..*" InventoryItem : holds
-    Location "0..1" -- "0..*" Barcode : usually goes in
-    Location "0..1" -- "0..*" ActivityLogEntry : happened in
-    RecipeIngredient ..> InventoryItem : matched by name
-    RecipeIngredient ..> IngredientAlias : name looked up
-    StockMinimum ..> InventoryItem : compared by name
-    WatchedProduct ..> Price : history by store and name
+    Recipe "1" *-- "0..*" RecipeIngredient
+    Recipe "1" *-- "0..*" RecipeVote
+    Recipe "1" *-- "0..*" MealPlanEntry
+    Person "1" -- "0..*" RecipeVote
+    Person "0..1" -- "0..*" ActivityLogEntry
+    Person "1" -- "0..*" WatchedProduct
+    Person "0..1" -- "0..*" Barcode
+    Store "1" -- "0..*" Price
+    Store "1" -- "0..*" WatchedProduct
+    Location "1" -- "0..*" InventoryItem
+    Location "0..1" -- "0..*" Barcode
+    Location "0..1" -- "0..*" ActivityLogEntry
+    RecipeIngredient ..> InventoryItem
+    RecipeIngredient ..> IngredientAlias
+    StockMinimum ..> InventoryItem
+    WatchedProduct ..> Price
 ```
 
 ## Later: the ingredients table
