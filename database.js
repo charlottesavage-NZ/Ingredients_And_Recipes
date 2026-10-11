@@ -375,8 +375,8 @@ function columnName(col) {
 
 // Columns server.js sends values for (not ones the database numbers
 // itself, and not read-only ones). A "now" column is sent too, so a
-// row that already has its own time (e.g. an old log line loaded by
-// the migration script) keeps it - only a blank one gets "now".
+// row that already has its own time keeps it - only a blank one gets
+// "now".
 function sentColumns(definition) {
     return definition.columns.filter(col => !col.position && !col.readSql);
 }
@@ -773,25 +773,8 @@ function appendRows(file, rows, callback) {
     saveMany([{ file, rows, mode: 'append' }], callback);
 }
 
-// For the migration script: how many rows each table has.
-async function countRows(file) {
-    const definition = tableFor(file);
-    const result = await runBatch(request => {
-        const conditions = whereClause(request, definition, 'where');
-        return `SELECT COUNT(*) AS total FROM ${definition.table}` +
-            (conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '') + ';';
-    });
-    return result.recordset[0].total;
-}
-
-// For the migration script: lets the program finish once it's done.
-async function close() {
-    if (poolPromise) {
-        const pool = await poolPromise;
-        poolPromise = null;
-        await pool.close();
-    }
-}
+// (countRows() and close() were only used by the one-off CSV migration
+// script, and were taken out with it.)
 
 module.exports = {
     enabled,
@@ -802,7 +785,5 @@ module.exports = {
     replaceRows,
     appendRows,
     saveMany,
-    saveManyAsync,
-    countRows,
-    close
+    saveManyAsync
 };

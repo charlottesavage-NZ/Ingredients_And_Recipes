@@ -2,9 +2,11 @@
 -- SEED INGREDIENTS - the built-in ingredients (448, with tin sizes)
 -- and aliases (596), for a NEW database
 -- =============================================================
--- (Generated from ingredient-data.js.) Run in SSMS straight after
+-- (Generated from the original ingredient-data.js, which has since
+-- been removed - this file and the database hold that list now.)
+-- Run in SSMS straight after
 -- database/create-tables.sql on a new database, e.g. pantry_dev.
--- The live database got these from database/ingredients-upgrade.sql.
+-- The live database got these from database/archive/ingredients-upgrade.sql.
 -- Safe to re-run - only adds rows that aren't there yet.
 -- =============================================================
 

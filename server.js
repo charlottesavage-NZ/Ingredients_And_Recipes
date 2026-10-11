@@ -362,8 +362,9 @@ function calculateTrentsUnitPrice(price, sizeText) {
     return { cupPrice: null, cupMeasure: sizeText || null };
 }
 
-// (parseCSVRows() and parseCSV() - turning CSV text into rows - now
-// live in csv.js, so the database migration script can share them.)
+// (parseCSVRows() and parseCSV() - turning CSV text into rows - moved
+// to csv.js for the one-off database migration, and were taken out
+// with it once the CSV files were retired.)
 //
 // (UPDATE, phase 2: csvField(), stringifyCSV() and stringifyGenericCSV()
 // - which turned lists back into CSV text for saving - were taken out

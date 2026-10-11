@@ -8,6 +8,13 @@
 # database - see database.js and database-config.example.js.
 /database-config.js
 
+# Downloaded libraries (Playwright, the SQL Server driver). Not kept in
+# git - they're downloaded from package.json / package-lock.json with
+# "npm ci" instead (on the garage: after an update that changes them).
+# Being listed here also means the garage's hourly "git clean -fd"
+# leaves them alone.
+node_modules/
+
 # Live household data - the garage server owns these, so a pull
 # must never overwrite them with the copies from this computer
 *.csv

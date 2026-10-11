@@ -4,7 +4,7 @@
 -- For building a NEW, empty database (e.g. a pantry_dev copy for
 -- testing) - then run database/seed-ingredients.sql to add the
 -- built-in ingredients and aliases. The live database was upgraded
--- with database/phase2-upgrade.sql and database/ingredients-upgrade.sql
+-- with the one-off scripts in database/archive
 -- instead.
 --
 -- Run once in SSMS with the ADMIN login, on the target database

@@ -1,6 +1,6 @@
 -- =============================================================
 -- CHECK THE DATA - run in SSMS on the pantry database, e.g. after
--- database/phase2-upgrade.sql or the CSV migration, to see the data
+-- an upgrade (see database/archive), to see the data
 -- is all there. (Updated for the phase 3 tables.)
 -- =============================================================
 
