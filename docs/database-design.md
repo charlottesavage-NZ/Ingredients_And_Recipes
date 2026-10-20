@@ -9,7 +9,7 @@ The household data lives in the Azure SQL database `pantry` on `charlotte-invent
 - **Phase 2** - people, stores and locations, natural and composite keys (made by [`database/archive/phase2-upgrade.sql`](../database/archive/phase2-upgrade.sql))
 - **Phase 1** - the tables first moved off the CSV files
 
-The table definitions for the newest design are in [`database/create-tables.sql`](../database/create-tables.sql). The diagrams are drawn by hand into the SVG files in [`docs/diagrams`](diagrams).
+The table definitions for the newest design are in [`database/create-tables.sql`](../database/create-tables.sql). The diagrams are laid out by hand into the SVG files in [`docs/diagrams`](diagrams) - the website's tables as they are today are under Phase 5, and the reports warehouse under Phase 6.
 
 ## Reading the UML diagrams
 
@@ -107,7 +107,33 @@ The shared ("conformed") dimensions are what link the stars together: dim_ingred
 - stock_minimums is gone: a minimum is a fact about an ingredient ("always want 2 tins of tomatoes"), so it's two columns on ingredients, minimum_quantity and minimum_unit. One fewer table, and no more repeating the name.
 - "Home Brand" is gone: prices keep their real brand (Pams, Woolworths Essentials). The upgrade put the real brand back on the 123 prices saved as "Home Brand ...", from the supermarket's own name in original_name. Pams and Woolworths own-brand products never share a barcode, so comparing those is done by their ingredient instead.
 - Still 15 tables: products replaces barcodes, store_products replaces stock_minimums.
-- (The phase 5 diagrams aren't drawn yet - the phase 3 diagrams below show everything else, which is unchanged.)
+
+### The website's tables today
+
+The whole design on one page, keys only - every primary key (PK), foreign key (FK) and unique key (UK), and every relationship between them:
+
+![Phase 5 website tables - overview, keys only](diagrams/p5-overview.svg)
+
+The same tables split into the four things the site does, with every column. A faded, dashed table belongs to another area and is only there to show what it links to.
+
+- A line ending in a bar and a circle (zero or one) is an optional link: the column can be empty, e.g. a log line with nobody logged in.
+- A dotted line is matched in the website code, not by a foreign key.
+
+**Stock** - what's in the house, the master list of ingredients, and products by barcode
+
+![Phase 5 stock tables](diagrams/p5-stock.svg)
+
+**Recipes** - recipes, their ingredients, votes and the meal plan
+
+![Phase 5 recipe tables](diagrams/p5-recipes.svg)
+
+**Prices** - stores, saved prices, the watch list, and supermarket product codes. Dotted lines: a price finds its product through its store's chain + product_code, and a watched product finds its price history by store and name.
+
+![Phase 5 price tables](diagrams/p5-prices.svg)
+
+**People** - who can log in, the activity log, and everything that records who did it
+
+![Phase 5 people tables](diagrams/p5-people.svg)
 
 ### What changed, table by table
 
