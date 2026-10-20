@@ -895,6 +895,26 @@ COMMIT TRANSACTION;`;
     });
 }
 
+// -------------------------------------------------------------
+// THE WAREHOUSE (UPDATE, phase 6 - database/warehouse.sql)
+// -------------------------------------------------------------
+// Runs dw.usp_load_warehouse, which copies the website's tables into
+// the galaxy schema used for reports (Power BI). It only reads the
+// website's tables, so nothing the site shows changes. server.js runs
+// it once a day, after the morning watch list check - the database is
+// awake then anyway, so it costs almost nothing extra.
+// -------------------------------------------------------------
+async function refreshWarehouseAsync() {
+    await runBatch(() => 'EXEC dw.usp_load_warehouse;');
+}
+
+function refreshWarehouse(callback) {
+    refreshWarehouseAsync().then(() => callback(null), err => {
+        console.error('Database: could not refresh the warehouse (has database/warehouse.sql been run?):', err.message);
+        callback(err);
+    });
+}
+
 // The callback version: callback(err).
 function linkStoreProducts(links, callback) {
     linkStoreProductsAsync(links).then(() => callback(null), err => {
@@ -913,5 +933,6 @@ module.exports = {
     appendRows,
     saveMany,
     saveManyAsync,
-    linkStoreProducts
+    linkStoreProducts,
+    refreshWarehouse
 };

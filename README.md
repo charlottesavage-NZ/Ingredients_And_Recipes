@@ -64,6 +64,7 @@ This is intended to help with a couple of issues:
   - Recipes save with `MERGE`, and their ingredients, votes and meal-plan entries are linked by foreign keys with `ON DELETE CASCADE`.
   - Prices and the activity log are insert-only, so the full history is kept line by line.
   - Saves still go through a one-at-a-time queue, so two people saving at once can't overwrite each other.
+- **Reports use a warehouse: a galaxy schema.** A separate `dw` schema holds real fact and dimension tables, with surrogate keys, primary keys and foreign keys: six fact tables (prices, the activity log, a daily stock snapshot, recipe ingredients, votes, the meal plan) sharing dimensions (date, store, chain, product, ingredient, location, person, recipe, activity type). A stored procedure, `dw.usp_load_warehouse`, fills it from the website's tables every morning. See `database/warehouse.sql`.
 - **Price reports use a star schema.** Views in a separate `reporting` schema (`vw_fact_price`, `dim_store`, `dim_product`, `dim_date`, plus `vw_latest_price`) let a tool like Power BI chart prices by store, by chain and over time, through a read-only `pantry_reports` login. See `database/reporting-views.sql`.
 - **The CSV files are retired.** The site needs `database-config.js` and stops with a clear message without it. The old CSV files are kept on the garage as an archive.
 - **The store list and who can log in live in the database.** Adding a store (with its cookie value or store ID as `store_code`) or a person is one `INSERT` in SSMS, picked up within the hour.
@@ -79,7 +80,8 @@ This is intended to help with a couple of issues:
 | `database/products-upgrade.sql` | One-off upgrade to phase 5: products by barcode, supermarket product codes, minimums on the ingredients table, real brands back on "Home Brand" prices |
 | `database/archive/` | The one-off upgrade scripts that have already been run (phase 2, and phase 3's ingredients table), kept for the record |
 | `database/seed-ingredients.sql` | The built-in ingredients and aliases, for a new database (run after `create-tables.sql`) |
-| `database/reporting-views.sql` | The star schema views for price reports (safe to re-run) |
+| `database/warehouse.sql` | The reports warehouse: the galaxy schema tables and the procedure that loads them (safe to re-run) |
+| `database/reporting-views.sql` | The phase 4 star schema views for price reports (safe to re-run) |
 | `database/reports-login.sql` | Creates the read-only `pantry_reports` login for Power BI |
 | `database/check-migration.sql` | Queries to check the data is all there |
 | `docs/database-design.md` | The database design, with crow's foot and UML diagrams |
@@ -205,3 +207,12 @@ Same pattern as phases 2 and 3 - the tables and the code change together, so the
 5. Push the phase 5 code from your PC, then run update-pantry on the garage.
 6. `systemctl start ingredients-recipes-update.timer`.
 7. In SSMS, run `database/check-migration.sql`, and try the site: scan something, save a price, check Running Low.
+
+### The reports warehouse: a galaxy schema (phase 6)
+
+New tables only, in their own `dw` schema - the website's tables don't change, so it keeps running.
+
+1. In SSMS, right-click **pantry -> New Query** (the yellow bar must say `pantry`), paste in `database/warehouse.sql` and run it. It creates the tables, gives `pantry_app` permission to run the load and `pantry_reports` permission to read it, runs the first load, and ends with a row count for each table.
+2. Push the phase 6 code, then run update-pantry on the garage. From then on the site refreshes the warehouse every morning after the watch list check.
+3. In SSMS you can draw it: expand **pantry -> Database Diagrams -> New Database Diagram** and add the `dw` tables - the foreign keys draw the lines.
+4. In Power BI, load the `dw` tables instead of the `reporting` views (see `docs/database-design.md`).

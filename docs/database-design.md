@@ -2,6 +2,7 @@
 
 The household data lives in the Azure SQL database `pantry` on `charlotte-inventory2.database.windows.net`. This page documents each version of the design, each as a crow's foot entity-relationship diagram and a UML class diagram:
 
+- **Phase 6** - the warehouse: a galaxy schema for reports, with real keys (made by [`database/warehouse.sql`](../database/warehouse.sql))
 - **Phase 5** - products by barcode, supermarket product codes, minimums on the ingredients table (made by [`database/products-upgrade.sql`](../database/products-upgrade.sql))
 - **Phase 4** - star schema views for price reports (made by [`database/reporting-views.sql`](../database/reporting-views.sql))
 - **Phase 3** - the ingredients table, live since 12 October 2026 (made by [`database/archive/ingredients-upgrade.sql`](../database/archive/ingredients-upgrade.sql))
@@ -41,6 +42,62 @@ Read across the line, using the number at the far end. Store 1 to Price 0..* mea
 ![Dashed arrow: "looked up by name"](diagrams/uml-dependency.svg)
 
 No foreign key - the website code finds the matching row by comparing names, and the arrow points at the table being looked up. After phase 3 only one is left: a watched product's price history.
+
+## Phase 6: the warehouse (a galaxy schema)
+
+- The website's tables (the dbo schema) stay as they are: normalised, so each fact is stored once and a change touches one row. That's the right shape for an app. Reports want a different shape, so the warehouse is a second copy of the data, in its own dw schema, laid out for reports.
+- It's a galaxy (or constellation) schema: six fact tables share the same dimension tables. Two dimensions branch off another one - store -> chain and product -> ingredient - which is the snowflake part.
+- Facts are things that happened, or were true on a day: a price was saved, stock was used, this was in the fridge on Tuesday. Dimensions are what you slice them by: when, where, who, what.
+- Every dimension has a surrogate key (store_key, product_key...) - a plain number that never changes - plus its business key from the website (store_name, barcode...) as a unique key (UK). Facts point at dimensions only through those numbers.
+- Each fact's primary key is its grain - what one row is - so it mirrors the website table it came from: a price is one store + saved name + moment. Values like saved_name and logged_at are degenerate dimensions: identifying values kept on the fact, with no table of their own.
+- Key -1 is the Unknown row in a dimension, e.g. a log line with nobody logged in, or a log line whose item doesn't match an ingredient any more. So every foreign key always has a row to point at.
+- dw.usp_load_warehouse fills it from the website's tables, in one transaction. Dimensions are upserted with MERGE, so keys never change; a row gone from the website stays with is_current = 0. Facts are reloaded, except fact_stock_snapshot, which adds today's copy of the stock list and keeps every earlier day - so stock levels build up a history.
+- The website runs the load every morning after the watch list check. Run `EXEC dw.usp_load_warehouse;` in SSMS before refreshing Power BI if you want it up to the minute.
+
+![Phase 6 warehouse - crow's foot diagram, keys only](diagrams/p6-galaxy.svg)
+
+Fact tables have orange headers, dimension tables blue. The diagram shows the keys; every column is listed below.
+
+### Which facts use which dimensions (the bus matrix)
+
+| Fact | date | store / chain | product / ingredient | ingredient | location | person | activity type | recipe |
+|---|---|---|---|---|---|---|---|---|
+| `fact_price` | yes | yes | yes | (through product) | | | | |
+| `fact_activity` | yes | | | yes | yes | yes | yes | |
+| `fact_stock_snapshot` | yes | | | yes | yes | | | |
+| `fact_recipe_ingredient` | | | | yes | | | | yes |
+| `fact_recipe_vote` | | | | | | yes | | yes |
+| `fact_meal_plan` | | | | | | | | yes |
+
+The shared ("conformed") dimensions are what link the stars together: dim_ingredient joins prices, stock movements, stock levels and recipes, so a report can show, for one ingredient, what it costs, how fast it's used, how much is in the house and which recipes need it.
+
+### Every warehouse table and its columns
+
+| Table | Primary key | Other columns |
+|---|---|---|
+| `dim_date` | `date_key` (e.g. 20261020) | full_date (UK), year, quarter, month_number, month_name, year_month, iso_week, day_of_week (Mon = 1), day_name, is_weekend |
+| `dim_person` | `person_key` | person_id (UK), name, is_current |
+| `dim_location` | `location_key` | location_code (UK), location_name, storage_type, sort_order, is_current |
+| `dim_chain` | `chain_key` | chain_name (UK) |
+| `dim_store` | `store_key` | store_name (UK), chain_key (FK), suburb, is_main_store, is_preferred, is_active, is_current |
+| `dim_ingredient` | `ingredient_key` | ingredient_name (UK), source, tin_quantity, tin_unit, minimum_quantity, minimum_unit, has_minimum, is_current |
+| `dim_product` | `product_key` | product_ref (UK: "barcode:..." or "name:..."), barcode, product_name, brand, ingredient_key (FK), is_home_brand, is_current |
+| `dim_recipe` | `recipe_key` | recipe_id (UK), recipe_name, servings, is_current |
+| `dim_activity_type` | `activity_type_key` | action (UK), category (stock in, stock out, stock change, running low, minimum, recipe, other), direction (+1, -1, 0) |
+| `fact_price` | `store_key + saved_name + checked_at` | date_key, product_key, checked_at_nz, price, cup_price, cup_measure, package_size, original_name, product_code, change_since_last_check |
+| `fact_activity` | `logged_at + line_no` | date_key, person_key, location_key, ingredient_key, activity_type_key, logged_at_nz, item_as_typed, quantity, unit, signed_quantity, details |
+| `fact_stock_snapshot` | `date_key + location_key + item_name + unit` | ingredient_key, quantity, is_low |
+| `fact_recipe_ingredient` | `recipe_key + line_no` | ingredient_key, name_as_written, quantity, unit |
+| `fact_recipe_vote` | `recipe_key + person_key` | vote, vote_value (like = 1, dislike = -1) |
+| `fact_meal_plan` | `recipe_key + day_of_week` | day_name, people_count |
+
+### Power BI on the warehouse
+
+1. Get data -> Azure SQL database, the same server and database, Import, Database credentials pantry_reports.
+2. Tick the dw tables and Load. Power BI reads the foreign keys and makes the relationships itself: each is many-to-one (*:1) from the fact to the dimension, single direction.
+3. Mark dw dim_date as the date table (date column: full_date).
+4. dim_store -> dim_chain and dim_product -> dim_ingredient are the snowflake relationships - keep them; slicing prices by chain or ingredient goes through them.
+5. Hide the key columns (the *_key ones) in report view - they're for joining, not for showing.
 
 ## Phase 5: products by barcode
 

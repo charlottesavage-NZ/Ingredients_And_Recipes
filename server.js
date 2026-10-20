@@ -2641,6 +2641,16 @@ function runWatchListCheck() {
                     watchCheckRunning = false;
                     console.log(`Watch list check finished - ${newPrices.length} price(s) saved.`);
                     done();
+
+                    // (UPDATE, phase 6) Then refresh the reports
+                    // warehouse - including today's prices, and today's
+                    // copy of the stock list. It only reads the
+                    // website's tables, so it doesn't need to wait in
+                    // the save queue. If it fails, it's just logged and
+                    // tried again tomorrow.
+                    database.refreshWarehouse(err => {
+                        if (!err) console.log('Reports warehouse refreshed.');
+                    });
                 });
             };
             appendPrices(newPrices, saveErr => {
