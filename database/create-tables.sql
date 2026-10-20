@@ -1,5 +1,5 @@
 -- =============================================================
--- CREATE TABLES - the full pantry database (phase 3 design)
+-- CREATE TABLES - the full pantry database (phase 5 design)
 -- =============================================================
 -- For building a NEW, empty database (e.g. a pantry_dev copy for
 -- testing) - then run database/seed-ingredients.sql to add the
@@ -68,9 +68,11 @@ END;
 
 -- -------------------------------------------------------------
 -- INGREDIENTS - the master list: one row per ingredient (or anything
--- else stocked, like cat food). Stock, recipe ingredients, minimums,
--- barcodes and aliases all point at it. tin_quantity / tin_unit = the
--- size of one tin, for things that come in tins.
+-- else stocked, like cat food). Stock, recipe ingredients, products
+-- and aliases all point at it. tin_quantity / tin_unit = the size of
+-- one tin, for things that come in tins. minimum_quantity /
+-- minimum_unit = "always want 2 tins of tomatoes", in the same base
+-- unit as the stock (g / ml / each), or NULL for no minimum.
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.ingredients', 'U') IS NULL
 BEGIN
@@ -79,7 +81,9 @@ BEGIN
         tin_quantity    DECIMAL(12,3) NULL,
         tin_unit        NVARCHAR(20)  NULL,
         source          NVARCHAR(10)  NOT NULL CONSTRAINT DF_ingredients_source DEFAULT 'yours'
-                        CONSTRAINT CK_ingredients_source CHECK (source IN ('built_in', 'yours'))
+                        CONSTRAINT CK_ingredients_source CHECK (source IN ('built_in', 'yours')),
+        minimum_quantity DECIMAL(12,3) NULL,
+        minimum_unit     NVARCHAR(20)  NULL
     );
 END;
 
@@ -207,6 +211,7 @@ BEGIN
         cup_measure   NVARCHAR(50)  NULL,
         package_size  NVARCHAR(50)  NULL,
         original_name NVARCHAR(300) NULL,       -- exactly as the supermarket wrote it
+        product_code  NVARCHAR(50)  NULL,       -- the supermarket's own code, see store_products
         CONSTRAINT PK_prices PRIMARY KEY (store_name, item_name, date_checked)
     );
 END;
@@ -236,45 +241,50 @@ END;
 
 
 -- -------------------------------------------------------------
--- STOCK MINIMUMS - "always want 2 tins of tomatoes", in the same
--- base unit as the stock (g / ml / each).
--- -------------------------------------------------------------
-IF OBJECT_ID('dbo.stock_minimums', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.stock_minimums (
-        name    NVARCHAR(200) NOT NULL,
-        unit    NVARCHAR(20)  NOT NULL,
-        ingredient_name NVARCHAR(200) NOT NULL
-                CONSTRAINT FK_stock_minimums_ingredient REFERENCES dbo.ingredients(ingredient_name) ON UPDATE CASCADE,
-        minimum DECIMAL(12,3) NOT NULL,
-        CONSTRAINT PK_stock_minimums PRIMARY KEY (name, unit)
-    );
-END;
-
-
--- -------------------------------------------------------------
--- BARCODES - your own barcode database: what each scanned barcode
--- is, so the next scan fills the form in straight away.
+-- PRODUCTS - one row per real product, keyed by its barcode, so the
+-- next scan fills the form in straight away and the same product
+-- lines up across supermarkets. Your name for it, its ingredient and
+-- where it's kept come from scanning it at home; a product a
+-- supermarket told us about can have none of those yet.
 -- source = 'openfoodfacts' (found there), 'scanned' (you typed the
--- name after scanning) or 'typed' (added by hand / uploaded).
+-- name after scanning), 'supermarket' (from a price check) or
+-- 'typed' (added by hand / uploaded).
 -- -------------------------------------------------------------
-IF OBJECT_ID('dbo.barcodes', 'U') IS NULL
+IF OBJECT_ID('dbo.products', 'U') IS NULL
 BEGIN
-    CREATE TABLE dbo.barcodes (
-        barcode            NVARCHAR(50)  CONSTRAINT PK_barcodes PRIMARY KEY,
-        item_name          NVARCHAR(200) NOT NULL,   -- your name for it, e.g. Tinned Tomatoes
-        ingredient_name    NVARCHAR(200) NOT NULL
-                           CONSTRAINT FK_barcodes_ingredient REFERENCES dbo.ingredients(ingredient_name) ON UPDATE CASCADE,
+    CREATE TABLE dbo.products (
+        barcode            NVARCHAR(50)  CONSTRAINT PK_products PRIMARY KEY,
+        item_name          NVARCHAR(200) NULL,       -- your name for it, e.g. Tinned Tomatoes
+        ingredient_name    NVARCHAR(200) NULL
+                           CONSTRAINT FK_products_ingredient REFERENCES dbo.ingredients(ingredient_name) ON UPDATE CASCADE,
         brand              NVARCHAR(100) NULL,
         product_name       NVARCHAR(300) NULL,       -- full name on the pack
         quantity           DECIMAL(12,3) NULL,       -- pack size
         unit               NVARCHAR(20)  NULL,
         location_code      NVARCHAR(10)  NULL
-                           CONSTRAINT FK_barcodes_location REFERENCES dbo.locations(location_code) ON UPDATE CASCADE,
+                           CONSTRAINT FK_products_location REFERENCES dbo.locations(location_code) ON UPDATE CASCADE,
         source             NVARCHAR(20)  NULL,
         added_by_person_id INT NULL
-                           CONSTRAINT FK_barcodes_person REFERENCES dbo.people(person_id),
+                           CONSTRAINT FK_products_person REFERENCES dbo.people(person_id),
         date_added         DATE NULL
+    );
+END;
+
+
+-- -------------------------------------------------------------
+-- STORE PRODUCTS - each supermarket chain's own code for a product
+-- (e.g. PAK'nSAVE "5001949-EA-000"), linked to its barcode. Per
+-- chain, not per store: every branch uses the same code.
+-- -------------------------------------------------------------
+IF OBJECT_ID('dbo.store_products', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.store_products (
+        chain        NVARCHAR(50) NOT NULL,
+        product_code NVARCHAR(50) NOT NULL,
+        barcode      NVARCHAR(50) NOT NULL
+                     CONSTRAINT FK_store_products_product REFERENCES dbo.products(barcode) ON UPDATE CASCADE,
+        date_linked  DATE NULL,
+        CONSTRAINT PK_store_products PRIMARY KEY (chain, product_code)
     );
 END;
 

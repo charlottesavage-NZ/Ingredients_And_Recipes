@@ -335,7 +335,13 @@ function savePrice(result) {
             cup_price: result.cupPrice,
             cup_measure: result.cupMeasure,
             package_size: result.packageSize,
-            store: result.store
+            store: result.store,
+            // (UPDATE, phase 5) the supermarket's own code for the
+            // product, plus its barcode and brand if the supermarket sent
+            // them - so the saved price can be linked to the real product.
+            product_code: result.productCode,
+            barcode: result.barcode,
+            brand: result.brand
         })
     })
         .then(response => response.json())
@@ -444,12 +450,15 @@ function singularWord(word) {
 
 // Breaks a product name down into its brand and its set of
 // meaningful words, ready to be compared by nameSimilarity().
+//
+// UPDATE, phase 5: prices aren't saved as "Home Brand ..." any more -
+// they keep their real brand ("Pams", "Woolworths") - so the special
+// case for "Home Brand" is gone and the first word is always the brand.
+// That means Pams and Woolworths own-brand products no longer share a
+// box; the same product at two supermarkets is matched by its barcode
+// instead (see renderPriceHistory()).
 function describeProductName(name) {
-    const lower = name.toLowerCase();
-    const isHomeBrand = lower.startsWith('home brand');
-    const rest = isHomeBrand ? lower.slice('home brand'.length) : lower;
-
-    let cleaned = rest
+    let cleaned = name.toLowerCase()
         .replace(/['’]/g, '')          // "Wattie's" -> "watties"
         .replace(/[^a-z0-9%]+/g, ' ')       // "&", "-", "," etc. become spaces
         .replace(HEALTHIER_VERSION_PHRASES, ' ');  // "no added salt" etc. - see above
@@ -463,10 +472,9 @@ function describeProductName(name) {
         .split(' ')
         .filter(Boolean);
 
-    // For anything that isn't Home Brand, the first word is the brand
-    // ("Wattie's", "Red", "Mutti"...).
-    const brand = isHomeBrand ? 'home brand' : (words[0] || '');
-    const descriptionWords = (isHomeBrand ? words : words.slice(1))
+    // The first word is the brand ("Wattie's", "Pams", "Red", "Mutti"...).
+    const brand = words[0] || '';
+    const descriptionWords = words.slice(1)
         .map(singularWord)
         .filter(word => !FILLER_WORDS.has(word) && !/^\d/.test(word));   // sizes like "150g" are ignored too
 
@@ -579,6 +587,22 @@ function renderPriceHistory() {
         if (filterText && !entry.item_name.toLowerCase().includes(filterText)) return;
         const sizeKey = normalizeSize(entry.package_size);
         let key = entry.item_name.toLowerCase().replace(/\s+/g, ' ').trim() + '|' + sizeKey;
+
+        // (UPDATE, phase 5) A price whose supermarket product code has
+        // been linked to a barcode goes in that barcode's box - so the
+        // same product from every supermarket shares one box, however
+        // each one words it. It never fuzzy-joins a box by name (the
+        // barcode is the better answer); prices WITHOUT a barcode still
+        // can join a barcode's box below, if their name is close enough.
+        if (entry.barcode) {
+            key = 'barcode|' + entry.barcode;
+            if (!groups.has(key)) {
+                groups.set(key, []);
+                groupTitles.set(key, entry.package_size ? `${entry.item_name} (${entry.package_size})` : entry.item_name);
+                groupBaseNames.set(key, entry.item_name);
+                groupDescriptions.set(key, { description: describeProductName(entry.item_name), sizeKey });
+            }
+        }
 
         // Not an exact match for an existing box? See if it's a close
         // enough match for one (same size only), and if so, join that
@@ -958,7 +982,11 @@ function watchProduct(result, button) {
             search_term: lastSearchTerm,
             price: result.price,
             cup_price: result.cupPrice,
-            cup_measure: result.cupMeasure
+            cup_measure: result.cupMeasure,
+            // (UPDATE, phase 5) same as savePrice() above
+            product_code: result.productCode,
+            barcode: result.barcode,
+            brand: result.brand
         })
     })
         .then(response => {

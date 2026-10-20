@@ -1,7 +1,7 @@
 -- =============================================================
 -- CHECK THE DATA - run in SSMS on the pantry database, e.g. after
 -- an upgrade (see database/archive), to see the data
--- is all there. (Updated for the phase 3 tables.)
+-- is all there. (Updated for the phase 5 tables.)
 -- =============================================================
 
 -- Row count per table
@@ -17,8 +17,10 @@ UNION ALL SELECT 'meal_plan', COUNT(*) FROM dbo.meal_plan
 UNION ALL SELECT 'ingredient_aliases', COUNT(*) FROM dbo.ingredient_aliases
 UNION ALL SELECT 'prices', COUNT(*) FROM dbo.prices
 UNION ALL SELECT 'activity_log', COUNT(*) FROM dbo.activity_log
-UNION ALL SELECT 'stock_minimums', COUNT(*) FROM dbo.stock_minimums
-UNION ALL SELECT 'barcodes', COUNT(*) FROM dbo.barcodes
+UNION ALL SELECT 'ingredients with a minimum', COUNT(*) FROM dbo.ingredients WHERE minimum_quantity IS NOT NULL
+UNION ALL SELECT 'products', COUNT(*) FROM dbo.products
+UNION ALL SELECT 'store_products', COUNT(*) FROM dbo.store_products
+UNION ALL SELECT 'prices with a product code', COUNT(*) FROM dbo.prices WHERE product_code IS NOT NULL
 UNION ALL SELECT 'watch_list', COUNT(*) FROM dbo.watch_list;
 
 -- Stock per storage area
@@ -53,9 +55,20 @@ ORDER BY l.sort_order, i.name;
 -- quick look that each one is what you'd expect
 SELECT 'stock' AS used_in, name, ingredient_name FROM dbo.inventory WHERE name <> ingredient_name
 UNION SELECT 'recipe', name, ingredient_name FROM dbo.recipe_ingredients WHERE name <> ingredient_name
-UNION SELECT 'minimum', name, ingredient_name FROM dbo.stock_minimums WHERE name <> ingredient_name
-UNION SELECT 'barcode', item_name, ingredient_name FROM dbo.barcodes WHERE item_name <> ingredient_name
+UNION SELECT 'product', item_name, ingredient_name FROM dbo.products WHERE item_name <> ingredient_name
 ORDER BY ingredient_name, name;
+
+-- Every minimum ("always want ...")
+SELECT ingredient_name, minimum_quantity, minimum_unit
+FROM dbo.ingredients
+WHERE minimum_quantity IS NOT NULL
+ORDER BY ingredient_name;
+
+-- Each supermarket product code linked to a barcode, with the product
+SELECT sp.chain, sp.product_code, sp.barcode, p.brand, p.product_name, p.item_name, sp.date_linked
+FROM dbo.store_products sp
+JOIN dbo.products p ON p.barcode = sp.barcode
+ORDER BY p.product_name, sp.chain;
 
 -- Ingredients you've added yourself (anything not in the built-in list)
 SELECT ingredient_name, tin_quantity, tin_unit

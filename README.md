@@ -28,7 +28,7 @@ This is intended to help with a couple of issues:
 **Inventory**
 - Tracks what's in the pantry, fridge, inside freezer and chest freezer. Amounts are stored in grams / millilitres / each, so "2 kg" and "500 g" of the same thing add together.
 - Tins are understood ("3 tins of chickpeas" = 1.2 kg), and tinned goods show how many tins that is.
-- Scan a product's barcode with your phone camera to fill in the form. Products are looked up on [Open Food Facts](https://world.openfoodfacts.org), and the app remembers the name you used for each barcode.
+- Scan a product's barcode with your phone camera to fill in the form. Products are looked up in your own products table first, then on [Open Food Facts](https://world.openfoodfacts.org), and the app remembers the name you used for each barcode.
 - Remove single items, with an Undo button for a few seconds after any change.
 - Optional stock minimums ("always want 2 tins of tomatoes") with a Running Low list.
 
@@ -45,7 +45,7 @@ This is intended to help with a couple of issues:
 
 **Price Checker**
 - Live price searches at Woolworths, PAK'nSAVE and Trents Wholesale (or all three at once), sortable by price or unit price.
-- Saved price history grouped by product across stores, with a price graph.
+- Saved price history grouped by product across stores, with a price graph. Each saved price keeps the supermarket's own product code; once that code is linked to a barcode, the same product from every supermarket shares one box.
 - **Watch list**: star a product and the server re-checks its price every morning by itself. It shows "Price drop" and "Lowest price we've seen" badges.
 
 **Behind the scenes**
@@ -56,10 +56,10 @@ This is intended to help with a couple of issues:
 ## How it's built
 
 - **No framework.** Plain HTML, CSS and JavaScript pages, and one Node.js server (`server.js`) using Node's built-in `http` module.
-- **Data is stored in an Azure SQL Database** (Microsoft SQL Server in the cloud, on the free offer). There are 15 tables: people, stores, storage locations and a master list of ingredients, plus inventory, recipes, recipe ingredients, votes, aliases, prices, the activity log, stock minimums, barcodes, the meal plan and the watch list. See `database/create-tables.sql`, and [`docs/database-design.md`](docs/database-design.md) for the crow's foot and UML diagrams.
-  - Only `people` has a number id. Every other table is keyed by its real-world identity, with composite keys where one column isn't enough (stock is keyed on storage area + name + unit, prices on store + product + time).
+- **Data is stored in an Azure SQL Database** (Microsoft SQL Server in the cloud, on the free offer). There are 15 tables: people, stores, storage locations, a master list of ingredients (which also holds each stock minimum) and products (keyed by barcode), plus inventory, recipes, recipe ingredients, votes, aliases, prices, store products (each supermarket's product code linked to a barcode), the activity log, the meal plan and the watch list. See `database/create-tables.sql`, and [`docs/database-design.md`](docs/database-design.md) for the crow's foot and UML diagrams.
+  - Only `people` has a number id. Every other table is keyed by its real-world identity, with composite keys where one column isn't enough (stock is keyed on storage area + name + unit, prices on store + product + time, products on their barcode, store products on chain + the supermarket's product code).
   - `server.js` still works with names ("Todd", "Woolworths Ferrymead"). `database.js` swaps them for keys inside the SQL.
-  - Stock, recipe ingredients, minimums and barcodes keep the name as typed, plus a link to the ingredient it counts as ("Diced Tomatoes" -> "Tinned Tomatoes"). The built-in aliases, tin sizes and suggestion names live in the `ingredients` and `ingredient_aliases` tables.
+  - Stock, recipe ingredients and products keep the name as typed, plus a link to the ingredient it counts as ("Diced Tomatoes" -> "Tinned Tomatoes"). The built-in aliases, tin sizes and suggestion names live in the `ingredients` and `ingredient_aliases` tables.
   - Each save is one T-SQL batch in a single transaction. The rows are sent as JSON and unpacked with `OPENJSON`, so a save is all-or-nothing.
   - Recipes save with `MERGE`, and their ingredients, votes and meal-plan entries are linked by foreign keys with `ON DELETE CASCADE`.
   - Prices and the activity log are insert-only, so the full history is kept line by line.
@@ -76,6 +76,7 @@ This is intended to help with a couple of issues:
 | `server.js` | The whole back end: reading and saving data, login, scrapers, recipe import, meal plan, watch list |
 | `database.js` | Everything that talks to Azure SQL: which table each kind of data lives in, reads, transactional saves, retries |
 | `database/create-tables.sql` | Creates all the tables in a new, empty database, with the starting people, stores and storage areas |
+| `database/products-upgrade.sql` | One-off upgrade to phase 5: products by barcode, supermarket product codes, minimums on the ingredients table, real brands back on "Home Brand" prices |
 | `database/archive/` | The one-off upgrade scripts that have already been run (phase 2, and phase 3's ingredients table), kept for the record |
 | `database/seed-ingredients.sql` | The built-in ingredients and aliases, for a new database (run after `create-tables.sql`) |
 | `database/reporting-views.sql` | The star schema views for price reports (safe to re-run) |
@@ -192,3 +193,15 @@ Views only - the website keeps running and nothing changes in the tables.
 3. Connect Power BI Desktop: **Get data -> Azure SQL database**, server `charlotte-inventory2.database.windows.net`, database `pantry`, **Import**, then **Database** credentials `pantry_reports`. Load the five `reporting` views, join `vw_fact_price` to the three dimensions on `full_date`, `store_name` and `product_name`, and mark `dim_date` as the date table. Your PC's IP address has to be allowed in the Azure firewall.
 
 Import mode only reads the database when you press Refresh, so reports barely touch the free monthly allowance. `docs/database-design.md` has the star diagram.
+
+### Upgrading the live database to phase 5: products by barcode (one-off)
+
+Same pattern as phases 2 and 3 - the tables and the code change together, so the site is stopped for a few minutes.
+
+1. In SSMS, take a backup copy: right-click `pantry` -> **Tasks -> Export Data-tier Application**.
+2. On the garage: `systemctl stop ingredients-recipes-update.timer && systemctl stop ingredients-recipes`.
+3. In SSMS, right-click **pantry -> New Query** (the yellow bar must say `pantry`), paste in `database/products-upgrade.sql` and run it. It's one transaction - if anything fails, nothing changes. It ends with the row counts and a few of the renamed prices.
+4. Re-run `database/reporting-views.sql` the same way (its home brand flag now looks for Pams and Woolworths).
+5. Push the phase 5 code from your PC, then run update-pantry on the garage.
+6. `systemctl start ingredients-recipes-update.timer`.
+7. In SSMS, run `database/check-migration.sql`, and try the site: scan something, save a price, check Running Low.

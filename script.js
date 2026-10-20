@@ -802,7 +802,10 @@ function lookUpBarcode(barcode) {
 
             if (product.source === 'saved') {
                 barcodeStatus.textContent = `Found: ${product.name} (you've added this before). Check it and press Add Item.`;
-            } else if (product.source === 'openfoodfacts') {
+            } else if (product.source === 'openfoodfacts' || product.source === 'supermarket') {
+                // (UPDATE, phase 5: 'supermarket' = a product we already
+                // know from a price check, but nobody's scanned at home yet
+                // - the name is the supermarket's, so it's worth tidying.)
                 barcodeStatus.textContent = `Found: ${product.name}. Change the name if you like (it'll be remembered next time), then press Add Item.`;
             } else {
                 barcodeStatus.textContent = "Not found in the database - type the name in and it'll be remembered next time you scan it.";

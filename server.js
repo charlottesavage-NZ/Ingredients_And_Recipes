@@ -84,6 +84,10 @@ const PRICES_FILE = 'prices.csv';
 // "Woolworths Essentials Diced Tomatoes 400g Can" - item_name is the
 // tidied-up version used for grouping (see savedPriceName below).
 // Older rows saved before this column existed just have it blank.
+// (UPDATE, phase 5: there's also product_code now - the supermarket's
+// own code for the product - and, when reading, barcode - see
+// appendPrices() and database.js. The database keeps the columns now,
+// so this list is just a record of the original CSV layout.)
 const PRICE_HEADERS = ['id', 'item_name', 'price', 'cup_price', 'cup_measure', 'package_size', 'store', 'date_checked', 'original_name'];
 
 // -------------------------------------------------------------
@@ -174,25 +178,19 @@ async function loadStores() {
 }
 
 // -------------------------------------------------------------
-// SUPERMARKET HOME BRANDS - when a price is SAVED (not in the live
-// search results), the supermarkets' own budget brands are renamed
-// to one shared name, so the same product lines up across stores in
-// Saved Prices. e.g. both "Pams Diced Tomatoes" (Pak'nSave) and
-// "Woolworths Essentials Diced Tomatoes" (Woolworths) are saved as
-// "Home Brand Diced Tomatoes". Change HOME_BRAND_NAME to rename it.
-// Trents is left alone.
+// (UPDATE, phase 5: the supermarkets' own brands - Pams, Woolworths
+// Essentials etc. - used to be renamed to one shared "Home Brand"
+// name here when a price was saved, so they'd line up across stores.
+// It didn't work very well, so it's gone: prices keep their real
+// brand ("Pams Diced Tomatoes"), and the upgrade put the real brand
+// back on the ones already saved. The same product at different
+// supermarkets is lined up by its BARCODE instead, once the
+// supermarket's product code has been linked to one - see
+// linkStoreProducts() in database.js and appendPrices() below.)
 // -------------------------------------------------------------
-const HOME_BRAND_NAME = 'Home Brand';
-
-// Matches "Pams", "Pams Value", "Pams Finest" or "Woolworths
-// Essentials" at the START of a product name.
-// Also plain "Woolworths" - their own-brand range is sometimes just
-// called "Woolworths Diced Tomatoes" rather than "Essentials".
-const HOME_BRAND_PATTERN = /^(pams(\s+(value|finest))?|woolworths(\s+essentials)?)\b/i;
 
 // -------------------------------------------------------------
 // The name a price gets SAVED under (see the POST /prices route):
-// - home brands renamed to HOME_BRAND_NAME (see above)
 // - the pack size taken off the end of the name, since it's already
 //   saved in its own Size column - Woolworths writes it in the name
 //   ("...Diced Tomatoes 400g Can") but Pak'nSave doesn't, so without
@@ -202,7 +200,7 @@ const HOME_BRAND_PATTERN = /^(pams(\s+(value|finest))?|woolworths(\s+essentials)
 function savedPriceName(name, store) {
     if (!name || store === TRENTS_STORE_NAME) return name;
 
-    let cleaned = name.replace(HOME_BRAND_PATTERN, HOME_BRAND_NAME);
+    let cleaned = name;
 
     // Cut from the LAST pack size in the name onwards, e.g.
     // "Diced Tomatoes 400g Can" -> "Diced Tomatoes". Same size
@@ -1174,7 +1172,17 @@ async function searchWoolworths(searchTerm, storeName) {
                     // The new reply doesn't include the store's
                     // address like the old one did, so we use the
                     // store name that was chosen in the dropdown.
-                    store: chosenStore
+                    store: chosenStore,
+                    // (UPDATE, phase 5) Woolworths' own code for the
+                    // product, and its barcode, so a saved price can be
+                    // linked to the product (see appendPrices()). NOT yet
+                    // confirmed against a real reply from the new
+                    // GraphQL search - the old API called these "sku" and
+                    // "barcode". If a field isn't there it's just left
+                    // blank and the price saves the same as before.
+                    productCode: String(item.sku || variant.sku || item.productId || '') || null,
+                    barcode: item.barcode || variant.barcode || null,
+                    brand: item.brand || null
                 });
             });
         });
@@ -1329,7 +1337,14 @@ async function searchPakNSave(searchTerm, storeName) {
             // fields above are the more precise numbers to trust for
             // any actual calculations.
             packageSize: product.displayName || null,
-            store: chosenStore
+            store: chosenStore,
+            // (UPDATE, phase 5) Pak'nSave's own code for the product,
+            // e.g. "5001949-EA-000" (confirmed via a raw response dump).
+            // The same code is used at every Pak'nSave and New World.
+            // No barcode comes back with a search - that has to be
+            // linked separately (see linkStoreProducts() in database.js).
+            productCode: product.productId || null,
+            brand: product.brand || null
         };
     });
 }
@@ -1466,9 +1481,54 @@ function readPrices(callback) {
 // on the end, save it all back - was taken out with the CSV files.
 // Prices also no longer have an id: each one is known by its store,
 // product name and the exact time it was saved.)
+//
+// UPDATE, phase 5: each price can also carry
+// - product_code: the supermarket's own code for it (saved with it)
+// - barcode, brand: only if the supermarket sent them with the result
+//   (Woolworths' results can include the barcode). Those aren't saved
+//   on the price itself - instead, once the prices are in, the
+//   product code is linked to that barcode (see linkStoreProducts()
+//   in database.js), so from then on EVERY price with that code - old
+//   ones too - knows its barcode. If the linking goes wrong, the
+//   prices are still saved; it's just tried again next time.
 // -------------------------------------------------------------
 function appendPrices(newPrices, callback) {
-    database.appendRows(PRICES_FILE, newPrices, callback);
+    database.appendRows(PRICES_FILE, newPrices, err => {
+        if (err) return callback(err);
+
+        const links = newPrices
+            .filter(p => p.product_code && p.barcode)
+            .map(p => ({ store: p.store, product_code: p.product_code, barcode: p.barcode, brand: p.brand, product_name: p.original_name }));
+        if (links.length === 0) return callback(null);
+
+        database.linkStoreProducts(links, () => callback(null));
+    });
+}
+
+// -------------------------------------------------------------
+// Tidies a barcode from a supermarket so it matches one scanned at
+// home (UPDATE, phase 5): digits only, and the extra zeros on the
+// front of a 14-digit "GTIN-14" taken off, down to the usual 13
+// digits - e.g. "09415221000123" -> "9415221000123". Anything too
+// short to be a real barcode (under 8 digits) gives ''.
+// -------------------------------------------------------------
+function tidyBarcode(value) {
+    let digits = String(value || '').replace(/\D/g, '');
+    while (digits.length > 13 && digits.startsWith('0')) digits = digits.slice(1);
+    return digits.length >= 8 ? digits : '';
+}
+
+// -------------------------------------------------------------
+// The phase 5 fields every way of saving a price passes on from a
+// search result (see appendPrices() above): the supermarket's product
+// code, plus the barcode and brand if it sent them.
+// -------------------------------------------------------------
+function productFieldsFrom(result) {
+    return {
+        product_code: result.productCode || result.product_code || '',
+        barcode: tidyBarcode(result.barcode),
+        brand: result.brand || ''
+    };
 }
 
 // Reads ingredient_aliases.csv. If it doesn't exist yet (no
@@ -1556,7 +1616,8 @@ const INGREDIENT_NAME_FIELDS = {
     'chest.csv': 'name',
     'recipe_ingredients.csv': 'ingredient_name',
     'stock_minimums.csv': 'name',
-    'barcodes.csv': 'name'
+    // (UPDATE, phase 5: was 'barcodes.csv' - see the BARCODES section)
+    'products': 'name'
 };
 
 function linkIngredients(rows, nameField, callback) {
@@ -1803,6 +1864,10 @@ function rememberForUndo(sections, person, description, callback) {
 // minimum is stored in the same base unit as the stock itself
 // (grams / millilitres / each), so they can be compared directly -
 // e.g. "2 tins of tomatoes" is saved as 800 g.
+// (UPDATE, phase 5: they're saved ON the ingredients table now -
+// minimum_quantity and minimum_unit - so each ingredient has at most
+// one minimum, and the name shown is the ingredient's name. Still
+// read and saved here as 'stock_minimums.csv' - database.js handles it.)
 // -------------------------------------------------------------
 const STOCK_MINIMUMS_FILE = 'stock_minimums.csv';
 const STOCK_MINIMUM_HEADERS = ['name', 'minimum', 'unit'];
@@ -1873,7 +1938,11 @@ function readStockMinimums(callback) {
 //    products (Pams etc.) are often missing - then you just type
 //    the name in once, and from then on it's remembered (step 1).
 // -------------------------------------------------------------
-const BARCODES_FILE = 'barcodes.csv';
+// (UPDATE, phase 5: the barcodes table is now "products" - one row per
+// real product, keyed by barcode - see database.js. A product can also
+// be added by a price check, from a supermarket that sent its barcode:
+// that one has the supermarket's name for it but no name of yours yet.)
+const BARCODES_FILE = 'products';
 const BARCODE_HEADERS = ['barcode', 'name', 'quantity', 'unit', 'location'];
 
 // Open Food Facts asks every app to say who it is when it looks
@@ -2551,7 +2620,9 @@ function runWatchListCheck() {
                         package_size: match.packageSize,
                         store: match.store,
                         date_checked: new Date().toISOString(),
-                        original_name: match.name
+                        original_name: match.name,
+                        // (UPDATE, phase 5) product code, barcode, brand
+                        ...productFieldsFrom(match)
                     });
                 } catch (searchErr) {
                     console.error(`Watch list: couldn't check ${watched.item_name} at ${watched.store}:`, searchErr.message);
@@ -2746,9 +2817,10 @@ const server = http.createServer((req, res) => {
             // (UPDATE, phase 2: no id any more - a saved price is known
             // by its store, name and the exact time it was saved.)
             const entry = {
-                // Home brands renamed + pack size taken off the
-                // name, so it lines up across stores - see
-                // savedPriceName() near the top of this file.
+                // Pack size taken off the name, so it lines up across
+                // stores - see savedPriceName() near the top of this
+                // file. (UPDATE, phase 5: home brands aren't renamed
+                // any more.)
                 item_name: savedPriceName(newPrice.item_name, newPrice.store),
                 price: newPrice.price,
                 cup_price: newPrice.cup_price,
@@ -2756,10 +2828,12 @@ const server = http.createServer((req, res) => {
                 package_size: newPrice.package_size,
                 store: newPrice.store,
                 date_checked: new Date().toISOString(),
-                // The name exactly as the supermarket wrote it, so
-                // e.g. "Woolworths Essentials..." and "Woolworths..."
-                // can still be told apart once both are "Home Brand".
-                original_name: newPrice.item_name
+                // The name exactly as the supermarket wrote it, pack
+                // size and all.
+                original_name: newPrice.item_name,
+                // (UPDATE, phase 5) product code, barcode, brand - the
+                // page passes them on from the search result.
+                ...productFieldsFrom(newPrice)
             };
 
             appendPrices([entry], (err) => {
@@ -3299,7 +3373,9 @@ const server = http.createServer((req, res) => {
                         package_size: product.package_size,
                         store: product.store,
                         date_checked: new Date().toISOString(),
-                        original_name: product.item_name
+                        original_name: product.item_name,
+                        // (UPDATE, phase 5) product code, barcode, brand
+                        ...productFieldsFrom(product)
                     }], () => sendJson(res, watched));
                 });
             });
@@ -3418,7 +3494,13 @@ const server = http.createServer((req, res) => {
                     if (err) return sendText(res, 500, 'Could not read stock minimums');
 
                     // Replaces any minimum already set for this item.
-                    const others = minimums.filter(m => m.name.toLowerCase() !== name.toLowerCase());
+                    // (UPDATE, phase 5: minimums are saved on the
+                    // ingredient now, so "name" here is the ingredient's
+                    // name - matched the same way as everywhere else, so
+                    // a minimum set for "Chopped Tomatoes" replaces the
+                    // one shown as "Tinned Tomatoes" if they're aliases.)
+                    const nameKey = canonicalKey(name, aliasLookup);
+                    const others = minimums.filter(m => canonicalKey(m.name, aliasLookup) !== nameKey);
                     if (amount > 0) others.push({ name, minimum: roundTo2(amount), unit });
 
                     saveRows(STOCK_MINIMUMS_FILE, others, err => {
@@ -3449,7 +3531,15 @@ const server = http.createServer((req, res) => {
             if (err) return sendText(res, 500, 'Could not read barcodes');
 
             const saved = barcodes.find(b => b.barcode === barcode);
-            if (saved) return sendJson(res, { ...saved, source: 'saved' });
+            if (saved && saved.name) return sendJson(res, { ...saved, source: 'saved' });
+
+            // (UPDATE, phase 5) Known from a supermarket's price check
+            // but never scanned at home - suggest the supermarket's name
+            // for it. Its brand and full name are already saved, so
+            // nothing needs remembering for rememberBarcode().
+            if (saved && saved.product_name) {
+                return sendJson(res, { ...saved, name: saved.product_name, source: 'supermarket' });
+            }
 
             try {
                 const found = await lookUpOpenFoodFacts(barcode);

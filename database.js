@@ -30,6 +30,17 @@
 // works out (see linkIngredients() there) and this file saves into
 // each table's ingredient_name column, a foreign key to ingredients.
 //
+// UPDATE, phase 5: products by barcode (database/products-upgrade.sql).
+// - the barcodes table became "products" - one row per real product,
+//   keyed by its barcode. server.js calls it 'products' now.
+// - store_products links each supermarket chain's own product code
+//   (e.g. PAK'nSAVE's "5001949-EA-000") to a barcode - see
+//   linkStoreProducts() at the bottom of this file
+// - every saved price keeps that product code, and reading prices
+//   hands back the barcode it links to (if it's been linked yet)
+// - the minimums moved onto the ingredients table, but server.js still
+//   reads and saves them as 'stock_minimums.csv' (see setColumns below)
+//
 // The free Azure SQL Database pauses itself when nobody's using it,
 // and every minute it's awake counts against the free monthly
 // allowance. So this file:
@@ -107,6 +118,17 @@ const sql = enabled ? require('mssql') : null;
 //             Needed for recipes: deleting every recipe, even for a
 //             moment inside a transaction, would CASCADE and wipe out
 //             every recipe's ingredients, votes and meal plan entries.
+// - keepMissing: (with mergeSave) a row that's NOT in the list being
+//             saved is kept instead of deleted. Needed for products:
+//             a product a supermarket code points at can't be deleted,
+//             and one might be added by a price check while a barcode
+//             is being saved (UPDATE, phase 5)
+// - setColumns: the "file" is really just a few COLUMNS of another
+//             table's rows - the minimums live on the ingredients table.
+//             Saving never adds or deletes a row: it empties those
+//             columns on every row, then fills them in again for the
+//             rows in the list (matched on the key). readWhere says
+//             which rows count when reading (UPDATE, phase 5)
 // - addMissingStores: before saving, any store name not in the
 //             stores table yet is added to it (switched off, with no
 //             store code), so a price is never refused over its store
@@ -130,8 +152,11 @@ const LOCATION_NAME_LOOKUP = { table: 'dbo.locations', key: 'location_code', lab
 // The link to the ingredients table that phase 3 added to several
 // tables. server.js fills in "ingredient"; if it's ever missing, the
 // name as typed is used, which then becomes a new ingredient.
-function ingredientLink(typedNameField) {
-    return { csv: 'ingredient', column: 'ingredient_name', type: 'NVARCHAR(200)', kind: 'text', required: true, orUse: typedNameField };
+// (UPDATE, phase 5: optional = the link can be left empty - NULL -
+// which products need, for a product a supermarket told us about
+// before anyone at home has named it.)
+function ingredientLink(typedNameField, optional) {
+    return { csv: 'ingredient', column: 'ingredient_name', type: 'NVARCHAR(200)', kind: 'text', required: !optional, orUse: typedNameField };
 }
 
 function inventoryTable(location) {
@@ -244,7 +269,19 @@ const TABLES = {
             { csv: 'cup_price', type: 'DECIMAL(10,2)', kind: 'number' },
             { csv: 'cup_measure', type: 'NVARCHAR(50)', kind: 'text' },
             { csv: 'package_size', type: 'NVARCHAR(50)', kind: 'text' },
-            { csv: 'original_name', type: 'NVARCHAR(300)', kind: 'text' }
+            { csv: 'original_name', type: 'NVARCHAR(300)', kind: 'text' },
+            // (UPDATE, phase 5) The supermarket's own code for the
+            // product, e.g. PAK'nSAVE "5001949-EA-000" - blank for Trents
+            // and for prices saved before phase 5.
+            { csv: 'product_code', type: 'NVARCHAR(50)', kind: 'text' },
+            // The barcode that code is linked to in store_products (via
+            // the store's chain), or blank if it hasn't been linked yet.
+            // Read-only - links are saved by linkStoreProducts().
+            {
+                csv: 'barcode', kind: 'text',
+                readSql: '(SELECT TOP 1 sp.barcode FROM dbo.store_products AS sp JOIN dbo.stores AS st ON st.chain = sp.chain ' +
+                    'WHERE st.store_name = t.store_name AND sp.product_code = t.product_code)'
+            }
         ]
     },
 
@@ -267,28 +304,39 @@ const TABLES = {
         ]
     },
 
+    // (UPDATE, phase 5: the minimums are now two columns on the
+    // ingredients table - minimum_quantity and minimum_unit - so each
+    // ingredient has at most one minimum. server.js still sees rows of
+    // { name, minimum, unit }; "name" is the ingredient's name.)
     'stock_minimums.csv': {
-        table: 'dbo.stock_minimums',
-        key: ['name', 'unit'],
+        table: 'dbo.ingredients',
+        setColumns: true,
+        readWhere: 't.minimum_quantity IS NOT NULL',
+        key: ['ingredient'],
         addMissingIngredients: 'ingredient',
-        orderBy: 'name',
+        orderBy: 'ingredient_name',
         columns: [
-            { csv: 'name', type: 'NVARCHAR(200)', kind: 'text', required: true },
-            { csv: 'minimum', type: 'DECIMAL(12,3)', kind: 'number', required: true },
-            { csv: 'unit', type: 'NVARCHAR(20)', kind: 'text', required: true },
-            ingredientLink('name')
+            { csv: 'name', kind: 'text', readSql: 't.ingredient_name' },
+            ingredientLink('name'),
+            { csv: 'minimum', column: 'minimum_quantity', type: 'DECIMAL(12,3)', kind: 'number', required: true },
+            { csv: 'unit', column: 'minimum_unit', type: 'NVARCHAR(20)', kind: 'text', required: true }
         ]
     },
 
-    'barcodes.csv': {
-        table: 'dbo.barcodes',
+    // (UPDATE, phase 5: was 'barcodes.csv' / dbo.barcodes. The name and
+    // ingredient are optional now - a product learned from a supermarket
+    // has neither until someone scans it at home.)
+    'products': {
+        table: 'dbo.products',
         key: ['barcode'],
+        mergeSave: true,
+        keepMissing: true,
         addMissingIngredients: 'ingredient',
         orderBy: 'barcode',
         columns: [
             { csv: 'barcode', type: 'NVARCHAR(50)', kind: 'text', required: true },
-            { csv: 'name', column: 'item_name', type: 'NVARCHAR(200)', kind: 'text', required: true },
-            ingredientLink('name'),
+            { csv: 'name', column: 'item_name', type: 'NVARCHAR(200)', kind: 'text' },
+            ingredientLink('name', true),
             { csv: 'brand', type: 'NVARCHAR(100)', kind: 'text' },
             { csv: 'product_name', type: 'NVARCHAR(300)', kind: 'text' },
             { csv: 'quantity', type: 'DECIMAL(12,3)', kind: 'number' },
@@ -589,6 +637,8 @@ async function readRowsAsync(file) {
             return `t.${name} AS [${col.csv}]`;
         });
         const conditions = whereClause(request, definition, 'where', 't');
+        // (UPDATE, phase 5) e.g. only ingredients that have a minimum.
+        if (definition.readWhere) conditions.push(definition.readWhere);
         return `SELECT ${selects.join(', ')} FROM ${definition.table} AS t` +
             (conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '') +
             ` ORDER BY ${definition.orderBy.split(',').map(part => 't.' + part.trim()).join(', ')};`;
@@ -726,8 +776,23 @@ MERGE ${definition.table} AS target
 USING (${source}) AS s
 ON ${keyMatch}
 WHEN MATCHED THEN UPDATE SET ${others.map(name => `${name} = s.${name}`).join(', ')}
-WHEN NOT MATCHED BY TARGET THEN INSERT (${columns.join(', ')}) VALUES (${columns.map(name => `s.${name}`).join(', ')})
-WHEN NOT MATCHED BY SOURCE THEN DELETE;`);
+WHEN NOT MATCHED BY TARGET THEN INSERT (${columns.join(', ')}) VALUES (${columns.map(name => `s.${name}`).join(', ')})${definition.keepMissing ? ';' : `
+WHEN NOT MATCHED BY SOURCE THEN DELETE;`}`);
+        return statements.join('\n');
+    }
+
+    // (UPDATE, phase 5) Just some columns of existing rows, e.g. the
+    // minimums on the ingredients table: empty them everywhere, then
+    // fill them in for the rows in the list. (Any ingredient that
+    // wasn't there yet was already added by addMissingIngredients above.)
+    if (definition.setColumns) {
+        const keyColumns = definition.key.map(csvName => columnName(definition.columns.find(col => col.csv === csvName)));
+        const valueColumns = columns.filter(name => !keyColumns.includes(name));
+        statements.push(`
+UPDATE ${definition.table} SET ${valueColumns.map(name => `${name} = NULL`).join(', ')};
+UPDATE target SET ${valueColumns.map(name => `${name} = s.${name}`).join(', ')}
+FROM ${definition.table} AS target
+JOIN (${source}) AS s ON ${keyColumns.map(name => `target.${name} = s.${name}`).join(' AND ')};`);
         return statements.join('\n');
     }
 
@@ -776,6 +841,68 @@ function appendRows(file, rows, callback) {
 // (countRows() and close() were only used by the one-off CSV migration
 // script, and were taken out with it.)
 
+// -------------------------------------------------------------
+// LINKING SUPERMARKET PRODUCT CODES TO BARCODES (UPDATE, phase 5)
+// -------------------------------------------------------------
+// links: [{ store, product_code, barcode, brand, product_name }, ...]
+// e.g. a Woolworths search result that came with its barcode.
+//
+// In one transaction:
+// 1. any barcode not in the products table yet is added as a product
+//    (source 'supermarket'), with the brand and name the supermarket
+//    gave - no name of yours or ingredient yet, those come when it's
+//    scanned at home. A product that's already there is left alone.
+// 2. the store's CHAIN + product code is linked to that barcode in
+//    store_products (or re-linked, if it pointed somewhere else).
+//    A store with no chain set can't be linked, so it's skipped.
+// -------------------------------------------------------------
+async function linkStoreProductsAsync(links) {
+    const usable = links.filter(link => link.store && link.product_code && link.barcode);
+    if (usable.length === 0) return;
+
+    await runBatch(request => {
+        request.input('links', sql.NVarChar(sql.MAX), JSON.stringify(usable.map(link => ({
+            store: String(link.store),
+            product_code: String(link.product_code),
+            barcode: String(link.barcode),
+            brand: link.brand ? String(link.brand) : null,
+            product_name: link.product_name ? String(link.product_name) : null
+        }))));
+        const unpacked = `OPENJSON(@links) WITH (store NVARCHAR(100), product_code NVARCHAR(50), barcode NVARCHAR(50), ` +
+            `brand NVARCHAR(100), product_name NVARCHAR(300)) AS src`;
+        return `SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+DECLARE @today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'New Zealand Standard Time' AS DATE);
+
+INSERT INTO dbo.products (barcode, brand, product_name, source, date_added)
+SELECT src.barcode, MAX(src.brand), MAX(src.product_name), 'supermarket', @today
+FROM ${unpacked}
+WHERE NOT EXISTS (SELECT 1 FROM dbo.products AS p WHERE p.barcode = src.barcode)
+GROUP BY src.barcode;
+
+MERGE dbo.store_products AS target
+USING (
+    SELECT st.chain, src.product_code, MAX(src.barcode) AS barcode
+    FROM ${unpacked}
+    JOIN dbo.stores AS st ON st.store_name = src.store
+    WHERE st.chain IS NOT NULL
+    GROUP BY st.chain, src.product_code
+) AS s
+ON target.chain = s.chain AND target.product_code = s.product_code
+WHEN MATCHED AND target.barcode <> s.barcode THEN UPDATE SET barcode = s.barcode, date_linked = @today
+WHEN NOT MATCHED BY TARGET THEN INSERT (chain, product_code, barcode, date_linked) VALUES (s.chain, s.product_code, s.barcode, @today);
+COMMIT TRANSACTION;`;
+    });
+}
+
+// The callback version: callback(err).
+function linkStoreProducts(links, callback) {
+    linkStoreProductsAsync(links).then(() => callback(null), err => {
+        console.error('Database: could not link supermarket product codes to barcodes:', err.message);
+        callback(err);
+    });
+}
+
 module.exports = {
     enabled,
     TABLES,
@@ -785,5 +912,6 @@ module.exports = {
     replaceRows,
     appendRows,
     saveMany,
-    saveManyAsync
+    saveManyAsync,
+    linkStoreProducts
 };

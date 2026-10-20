@@ -45,12 +45,12 @@ GO
 
 
 -- -------------------------------------------------------------
--- DIM_PRODUCT - each product, by the tidied name prices are grouped
--- under (so "Home Brand Diced Tomatoes" is one product across stores).
+-- DIM_PRODUCT - each product, by the tidied name prices are saved
+-- under. is_home_brand = a supermarket's own brand (Pams, Woolworths).
 -- -------------------------------------------------------------
 CREATE OR ALTER VIEW reporting.dim_product AS
 SELECT d.product_name,
-       CAST(CASE WHEN d.product_name LIKE 'Home Brand%' THEN 1 ELSE 0 END AS BIT) AS is_home_brand,
+       CAST(CASE WHEN d.product_name LIKE 'Pams %' OR d.product_name LIKE 'Woolworths %' THEN 1 ELSE 0 END AS BIT) AS is_home_brand,
        CAST(d.first_checked AT TIME ZONE 'New Zealand Standard Time' AS DATE) AS first_checked,
        CAST(d.last_checked AT TIME ZONE 'New Zealand Standard Time' AS DATE) AS last_checked,
        d.times_checked,

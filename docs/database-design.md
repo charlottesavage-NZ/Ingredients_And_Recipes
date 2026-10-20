@@ -2,6 +2,7 @@
 
 The household data lives in the Azure SQL database `pantry` on `charlotte-inventory2.database.windows.net`. This page documents each version of the design, each as a crow's foot entity-relationship diagram and a UML class diagram:
 
+- **Phase 5** - products by barcode, supermarket product codes, minimums on the ingredients table (made by [`database/products-upgrade.sql`](../database/products-upgrade.sql))
 - **Phase 4** - star schema views for price reports (made by [`database/reporting-views.sql`](../database/reporting-views.sql))
 - **Phase 3** - the ingredients table, live since 12 October 2026 (made by [`database/archive/ingredients-upgrade.sql`](../database/archive/ingredients-upgrade.sql))
 - **Phase 2** - people, stores and locations, natural and composite keys (made by [`database/archive/phase2-upgrade.sql`](../database/archive/phase2-upgrade.sql))
@@ -41,11 +42,37 @@ Read across the line, using the number at the far end. Store 1 to Price 0..* mea
 
 No foreign key - the website code finds the matching row by comparing names, and the arrow points at the table being looked up. After phase 3 only one is left: a watched product's price history.
 
+## Phase 5: products by barcode
+
+- barcodes becomes products: one row per real product, keyed by its barcode. Your name for it and its ingredient are now optional, so a product a supermarket told us about can be saved before anyone has scanned it at home.
+- Adds store_products: each supermarket chain's own code for a product (PAK'nSAVE "5001949-EA-000") linked to its barcode. It's per chain, because every branch uses the same code. PAK'nSAVE and New World share codes.
+- prices gains product_code, so every saved price knows exactly which supermarket product it was. Once that code is linked to a barcode, every price with it - old ones too - knows its barcode, and Saved Prices puts the same product from every supermarket in one box.
+- stock_minimums is gone: a minimum is a fact about an ingredient ("always want 2 tins of tomatoes"), so it's two columns on ingredients, minimum_quantity and minimum_unit. One fewer table, and no more repeating the name.
+- "Home Brand" is gone: prices keep their real brand (Pams, Woolworths Essentials). The upgrade put the real brand back on the 123 prices saved as "Home Brand ...", from the supermarket's own name in original_name. Pams and Woolworths own-brand products never share a barcode, so comparing those is done by their ingredient instead.
+- Still 15 tables: products replaces barcodes, store_products replaces stock_minimums.
+- (The phase 5 diagrams aren't drawn yet - the phase 3 diagrams below show everything else, which is unchanged.)
+
+### What changed, table by table
+
+| Table | Primary key | Columns | Why |
+|---|---|---|---|
+| `products` (was `barcodes`) | `barcode` | item_name, ingredient_name, brand, product_name, quantity, unit, location_code, source, added_by_person_id, date_added | The hub for anything with a barcode. item_name and ingredient_name can be empty until it's scanned at home. source can now also be supermarket. |
+| `store_products` (new) | `chain + product_code` | barcode, date_linked | Links a supermarket's own product code to a barcode, so prices can be matched to the real product. |
+| `prices` | `store_name + item_name + date_checked` | ... plus product_code | The supermarket's own code for the product. Blank for Trents and for prices saved before phase 5. |
+| `ingredients` | `ingredient_name` | ... plus minimum_quantity, minimum_unit | The stock minimum, moved here from stock_minimums. Empty = no minimum. |
+| `stock_minimums` | - | - | Dropped - now part of ingredients. |
+
+### How a price gets linked to a barcode
+
+1. A price check saves the supermarket's product code with the price, every time.
+2. If the supermarket also sent the barcode (Woolworths' results can include it), the code is linked to that barcode in store_products, and the barcode is added to products if it's new.
+3. PAK'nSAVE doesn't send barcodes with search results. Searching PAK'nSAVE with a barcode does return its product code, so that's the way to link those - not built yet.
+
 ## Phase 4: star schema for price reports
 
 - Views only, in their own reporting schema - nothing is copied, so reports always see the latest prices. The website doesn't use them.
 - vw_fact_price is the fact: one row per saved price, with its NZ date, store, product, prices, size, and change_since_last_check (the difference from that product's previous price at that store).
-- dim_store, dim_product and dim_date are the dimensions to slice by: store and chain, product (home brand or not), and the NZ calendar (year, quarter, month, ISO week, weekday, weekend).
+- dim_store, dim_product and dim_date are the dimensions to slice by: store and chain, product (home brand or not - since phase 5, a name starting with Pams or Woolworths), and the NZ calendar (year, quarter, month, ISO week, weekday, weekend).
 - Keys stay natural: store_name, product_name and the date itself.
 - vw_latest_price is an extra view outside the star: the newest price for each product at each store, ranked so cheapest_rank = 1 is the cheapest store right now.
 - A read-only login, pantry_reports, can see only the reporting views - it's the one to give Power BI.
