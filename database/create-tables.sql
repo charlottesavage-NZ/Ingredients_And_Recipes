@@ -292,7 +292,7 @@ BEGIN
         product_code  NVARCHAR(50)  NULL,       -- the supermarket's own code, see store_products
         is_special    BIT NOT NULL CONSTRAINT DF_prices_is_special DEFAULT 0,
         was_price     DECIMAL(10,2) NULL,
-        special_type  NVARCHAR(20)  NULL CONSTRAINT CK_prices_special_type CHECK (special_type IN ('special', 'club', 'multibuy')),
+        special_type  NVARCHAR(20)  NULL CONSTRAINT CK_prices_special_type CHECK (special_type IN ('special', 'club', 'multibuy', 'extra_low')),
         special_note  NVARCHAR(100) NULL,
         CONSTRAINT PK_prices PRIMARY KEY (store_name, product_id, date_checked)
     );

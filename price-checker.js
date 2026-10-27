@@ -329,8 +329,17 @@ function renderResults(results) {
 // special, e.g. "Special - was $7.19 (SAVE $1.50)", "Club price - was
 // $2.85" or "Multibuy: 2 for $5.00". Nothing is added for a normal
 // price.
+// UPDATE: Pak'nSAVE's "Extra Low" prices (an everyday low price, not
+// a special) get a plain grey "Extra Low" note instead.
 // -------------------------------------------------------------
 function addSpecialNote(cell, isSpecial, wasPrice, specialType, specialNote) {
+    if (specialType === 'extra_low') {
+        const note = document.createElement('small');
+        note.classList.add('price-original-name');
+        note.textContent = 'Extra Low';
+        cell.appendChild(note);
+        return;
+    }
     if (!isSpecial) return;
 
     const label = specialType === 'club' ? 'Club price' : specialType === 'multibuy' ? 'Multibuy' : 'Special';

@@ -1414,6 +1414,11 @@ async function searchPakNSave(searchTerm, storeName) {
 // normal price isn't sent at all for these, so wasPrice is left blank.
 // (This used to be read as "a promotion at the same price - not a
 // special", which missed them.)
+// UPDATE 2: those are Pak'nSAVE's "Extra Low" prices - an everyday low
+// price, not a temporary special (the website shows the Heller's ham
+// as "Extra Low"). So they're NOT counted as a special: isSpecial stays
+// false, and specialType 'extra_low' records what kind of price it is,
+// so they can still be told apart and filtered in reports.
 // -------------------------------------------------------------
 function pakNSaveSpecial(product) {
     const single = product.singlePrice || {};
@@ -1430,12 +1435,12 @@ function pakNSaveSpecial(product) {
     const club = Boolean(promo.cardDependencyFlag);
     const threshold = promo.threshold || 1;
 
-    // The special price is already the price (see UPDATE above).
+    // An "Extra Low" price - already the price (see UPDATE 2 above).
     if (threshold === 1 && single.promoId && promo.promoId === single.promoId && promo.rewardValue >= normal) {
         return {
-            isSpecial: true,
-            specialType: club ? 'club' : 'special',
-            specialNote: promo.description || null
+            isSpecial: false,
+            specialType: 'extra_low',
+            specialNote: 'Extra Low'
         };
     }
 

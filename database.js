@@ -301,6 +301,8 @@ const TABLES = {
             // actually pay; on special, was_price is the normal price.
             // special_type: 'special', 'club' (needs the club card) or
             // 'multibuy' (e.g. 2 for $5 - price is still the single price).
+            // Also 'extra_low' - Pak'nSAVE's everyday low price - which
+            // is NOT a special (is_special stays 0), just a kind of price.
             { csv: 'is_special', type: 'BIT', kind: 'yesno', required: true },
             { csv: 'was_price', type: 'DECIMAL(10,2)', kind: 'number' },
             { csv: 'special_type', type: 'NVARCHAR(20)', kind: 'text' },
