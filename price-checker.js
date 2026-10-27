@@ -283,7 +283,15 @@ function renderResults(results) {
         sizeCell.textContent = result.packageSize || "—";
 
         const priceCell = document.createElement('td');
-        priceCell.textContent = `$${result.price}`;
+        // (UPDATE) No price (Trents sometimes shows none) -> a dash, and
+        // the Save button is switched off, since a price with no amount
+        // can't be saved.
+        const hasPrice = result.price !== null && result.price !== undefined && result.price !== '';
+        priceCell.textContent = hasPrice ? `$${result.price}` : '—';
+        if (!hasPrice) {
+            saveBtn.disabled = true;
+            saveBtn.title = 'No price to save';
+        }
         // (UPDATE, phase 7) On special? Say so under the price - see
         // specialText().
         addSpecialNote(priceCell, result.isSpecial, result.wasPrice, result.specialType, result.specialNote);

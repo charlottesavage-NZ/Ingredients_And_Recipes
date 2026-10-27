@@ -284,7 +284,7 @@ BEGIN
         product_id    INT NOT NULL CONSTRAINT FK_prices_product REFERENCES dbo.products(product_id),
         date_checked  DATETIMEOFFSET(3) NOT NULL,
         item_name     NVARCHAR(300) NOT NULL,   -- tidied name used for grouping (savedPriceName in server.js)
-        price         DECIMAL(10,2) NULL,
+        price         DECIMAL(10,2) NOT NULL,   -- a price with no amount is never saved
         cup_price     DECIMAL(10,2) NULL,
         cup_measure   NVARCHAR(50)  NULL,
         package_size  NVARCHAR(50)  NULL,

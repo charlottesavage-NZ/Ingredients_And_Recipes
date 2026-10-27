@@ -906,9 +906,17 @@ function appendRows(file, rows, callback) {
 // its own name as the chain.
 // -------------------------------------------------------------
 async function savePricesAsync(rows) {
-    if (rows.length === 0) return;
+    // (UPDATE) A result with no price (e.g. Trents sometimes shows
+    // none, for something out of stock) is left out - the price column
+    // doesn't allow blanks, and one blank shouldn't stop the rest of a
+    // batch (like the morning watch list check) from saving.
+    const priced = rows.filter(row => toDatabaseValue(row.price, { kind: 'number' }) !== null);
+    if (priced.length < rows.length) {
+        console.log(`Prices: left out ${rows.length - priced.length} with no price (${rows.filter(row => !priced.includes(row)).map(row => row.item_name).join(', ')}).`);
+    }
+    if (priced.length === 0) return;
     const definition = tableFor('prices.csv');
-    const prepared = spreadTimes(rows, definition).map(row => ({
+    const prepared = spreadTimes(priced, definition).map(row => ({
         store: String(row.store || ''),
         item_name: String(row.item_name || ''),
         date_checked: row.date_checked,

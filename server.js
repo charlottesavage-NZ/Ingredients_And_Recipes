@@ -2969,6 +2969,11 @@ const server = http.createServer((req, res) => {
             // same item.
             // (UPDATE, phase 2: no id any more - a saved price is known
             // by its store, name and the exact time it was saved.)
+            // (UPDATE) A result with no price (Trents sometimes shows
+            // none) can't be saved - the price column doesn't allow it.
+            if (newPrice.price === null || newPrice.price === undefined || newPrice.price === '' || !Number.isFinite(Number(newPrice.price))) {
+                return sendText(res, 400, 'No price to save');
+            }
             const entry = {
                 // Pack size taken off the name, so it lines up across
                 // stores - see savedPriceName() near the top of this
