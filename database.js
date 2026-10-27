@@ -885,6 +885,10 @@ function appendRows(file, rows, callback) {
 //    store with none (Trents) "name:" + its saved name
 // 3. a code not linked to a product yet, sent WITH a barcode we already
 //    know, is linked to that barcode's product
+// 3b. (UPDATE) a real code not linked yet, for a name that WAS saved
+//    by name before (e.g. Trents prices from before Trents' SKU was
+//    read - "name:Gilmours Tomato Sauce"), is linked to that same
+//    product - so its price history carries straight on
 // 4. any code still unknown gets a new product (named from the price,
 //    source 'price check') and is linked to it. MERGE rather than
 //    INSERT, so OUTPUT can hand back each new product_id next to the
@@ -953,6 +957,14 @@ SELECT n.chain, n.code_key, MAX(p.product_id), @today
 FROM @new AS n
 JOIN dbo.products AS p ON p.barcode = n.barcode
 WHERE NOT EXISTS (SELECT 1 FROM dbo.store_products AS sp WHERE sp.chain = n.chain AND sp.product_code = n.code_key)
+GROUP BY n.chain, n.code_key;
+
+INSERT INTO dbo.store_products (chain, product_code, product_id, date_linked)
+SELECT n.chain, n.code_key, MAX(byname.product_id), @today
+FROM @new AS n
+JOIN dbo.store_products AS byname ON byname.chain = n.chain AND byname.product_code = N'name:' + n.item_name
+WHERE n.product_code IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM dbo.store_products AS sp WHERE sp.chain = n.chain AND sp.product_code = n.code_key)
 GROUP BY n.chain, n.code_key;
 
 DECLARE @made TABLE (product_id INT, chain NVARCHAR(50), product_code NVARCHAR(320));

@@ -1522,7 +1522,17 @@ async function searchTrents(searchTerm) {
                 const priceMatch = priceBlock.match(/\$([\d.]+)/);
                 const price = priceMatch ? Number(priceMatch[1]) : null;
 
-                return { name, size, price };
+                // (UPDATE, phase 7) Trents' own product code - the
+                // hidden "SKU: 3186629" line in each tile (confirmed from
+                // a copy of the tile's HTML). Each tile also has a
+                // data-fan number (e.g. 5005285), which looks like the
+                // Foodstuffs article number Pak'nSAVE's codes start with
+                // - kept as fan for now, unused, until that's confirmed.
+                const skuText = item.querySelector('.cc_product_sku')?.textContent || '';
+                const sku = (skuText.match(/\d+/) || [null])[0];
+                const fan = item.querySelector('[data-fan]')?.getAttribute('data-fan') || null;
+
+                return { name, size, price, sku, fan };
             });
         });
     } finally {
@@ -1550,7 +1560,13 @@ async function searchTrents(searchTerm) {
             // shown as its own column regardless, since it's useful
             // to see even when a $/kg figure couldn't be calculated.
             packageSize: product.size,
-            store: TRENTS_STORE_NAME
+            store: TRENTS_STORE_NAME,
+            // (UPDATE, phase 7) Trents' SKU, so its prices link to
+            // products by code like the supermarkets' do. Older Trents
+            // prices were linked by name - savePrices() in database.js
+            // joins the two up.
+            productCode: product.sku || null,
+            foodstuffsCode: product.fan || null
         };
     });
 }
