@@ -1402,21 +1402,42 @@ async function searchPakNSave(searchTerm, storeName) {
 // - threshold 2 or more -> a multibuy, e.g. 2 for $5. The single price
 //   stays the price; the deal goes in the note.
 // - cardDependencyFlag -> needs the Club card
-// A promotion at the SAME price as normal (Pak'nSave lists lots of
-// these) isn't a special.
 // Gives back e.g. { isSpecial: true, price: 1.89, cupPrice: 1.26,
 // wasPrice: 2.85, specialType: 'special', specialNote: 'Limit 4
 // Assorted' }, or just { isSpecial: false }.
+//
+// UPDATE: there's a SECOND way Pak'nSave shows a special - and it's
+// the more common one (18 of 24 specials in a test search, e.g.
+// Heller's Shaved Champagne Leg Ham at $3.29). The special price is
+// already IN singlePrice, and singlePrice carries the promotion's
+// promoId to say so; the promotion itself shows the same price. The
+// normal price isn't sent at all for these, so wasPrice is left blank.
+// (This used to be read as "a promotion at the same price - not a
+// special", which missed them.)
 // -------------------------------------------------------------
 function pakNSaveSpecial(product) {
-    const normal = product.singlePrice && product.singlePrice.price;
-    const promo = (product.promotions || []).find(p => p.bestPromotion) || (product.promotions || [])[0];
+    const single = product.singlePrice || {};
+    const normal = single.price;
+    const promotions = product.promotions || [];
+    // The promotion singlePrice says it's already using, if any, else
+    // the best one.
+    const promo = promotions.find(p => single.promoId && p.promoId === single.promoId)
+        || promotions.find(p => p.bestPromotion) || promotions[0];
     if (!promo || typeof normal !== 'number' || typeof promo.rewardValue !== 'number' || promo.rewardType !== 'NEW_PRICE') {
         return { isSpecial: false };
     }
 
     const club = Boolean(promo.cardDependencyFlag);
     const threshold = promo.threshold || 1;
+
+    // The special price is already the price (see UPDATE above).
+    if (threshold === 1 && single.promoId && promo.promoId === single.promoId && promo.rewardValue >= normal) {
+        return {
+            isSpecial: true,
+            specialType: club ? 'club' : 'special',
+            specialNote: promo.description || null
+        };
+    }
 
     if (threshold > 1) {
         return {
