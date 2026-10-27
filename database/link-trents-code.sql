@@ -15,6 +15,8 @@
 --    Inspect, and read "SKU: ..." (the Trents code) and data-fan="..."
 --    (the Gilmours code) from its tile.
 -- 3. Fill in the four values in PART 2 and run PART 2. Repeat.
+--    A name with an apostrophe needs it typed twice inside the quotes,
+--    e.g. N'Campbell''s Real Stock' - it's still saved with just one.
 -- Safe to run twice for the same product - nothing is added twice.
 -- =============================================================
 
