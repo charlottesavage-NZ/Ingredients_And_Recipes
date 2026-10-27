@@ -186,7 +186,9 @@ async function loadStores() {
 // back on the ones already saved. The same product at different
 // supermarkets is lined up by its BARCODE instead, once the
 // supermarket's product code has been linked to one - see
-// linkStoreProducts() in database.js and appendPrices() below.)
+// appendPrices() below. (UPDATE, phase 7: every price now points at a
+// product, and a barcode links products - see linkBarcode() in
+// database.js.)
 // -------------------------------------------------------------
 
 // -------------------------------------------------------------
@@ -1154,8 +1156,15 @@ async function searchWoolworths(searchTerm, storeName) {
                     name: item.brand && !item.productName.toLowerCase().startsWith(item.brand.toLowerCase())
                         ? `${item.brand} ${item.productName}`
                         : item.productName,
-                    // What you actually pay for this variant.
+                    // What you actually pay for this variant. (On
+                    // special, this is already the special price.)
                     price: price.sellingPrice,
+                    // (UPDATE, phase 7) Specials - confirmed via a raw
+                    // response dump: isSpecial, wasPrice (the normal
+                    // price), and isClubPrice when it needs the
+                    // Everyday Rewards card. The yellow "SAVE $1.50"
+                    // label comes from the product's PricePromotion tag.
+                    ...woolworthsSpecial(item, price),
                     // Woolworths' own comparison price, e.g. 16.45
                     // for "1KG". cupUnit looks like "1KG", "1EA"
                     // or "100G", so it shows as "$16.45 / 1KG".
@@ -1174,12 +1183,11 @@ async function searchWoolworths(searchTerm, storeName) {
                     // store name that was chosen in the dropdown.
                     store: chosenStore,
                     // (UPDATE, phase 5) Woolworths' own code for the
-                    // product, and its barcode, so a saved price can be
-                    // linked to the product (see appendPrices()). NOT yet
-                    // confirmed against a real reply from the new
-                    // GraphQL search - the old API called these "sku" and
-                    // "barcode". If a field isn't there it's just left
-                    // blank and the price saves the same as before.
+                    // product, so a saved price can be linked to the
+                    // product (see appendPrices()). (UPDATE, phase 7:
+                    // confirmed via a raw response dump - "sku", e.g.
+                    // "266022". There's NO barcode in search results;
+                    // barcode stays here in case one ever appears.)
                     productCode: String(item.sku || variant.sku || item.productId || '') || null,
                     barcode: item.barcode || variant.barcode || null,
                     brand: item.brand || null
@@ -1219,6 +1227,27 @@ function sizeFromWoolworthsName(productName, variant) {
     if (unit.startsWith('KG')) return 'per kg';
 
     return null;
+}
+
+// -------------------------------------------------------------
+// (UPDATE, phase 7) Whether a Woolworths result is on special, e.g.
+// { isSpecial: true, wasPrice: 7.19, specialType: 'special',
+//   specialNote: 'SAVE $1.50' }. specialType is 'club' when the
+// price needs the Everyday Rewards card. Not on special -> just
+// { isSpecial: false }.
+// -------------------------------------------------------------
+function woolworthsSpecial(item, price) {
+    if (!price.isSpecial && !price.isClubPrice) return { isSpecial: false };
+
+    const promoTag = (item.tags || []).find(tag => tag.kind === 'PricePromotion');
+    const strap = promoTag && promoTag.content && promoTag.content.strap && promoTag.content.strap[0];
+
+    return {
+        isSpecial: true,
+        wasPrice: typeof price.wasPrice === 'number' ? price.wasPrice : null,
+        specialType: price.isClubPrice ? 'club' : 'special',
+        specialNote: (strap && strap.label) || null
+    };
 }
 
 // -------------------------------------------------------------
@@ -1319,6 +1348,8 @@ async function searchPakNSave(searchTerm, storeName) {
     return products.map(product => {
         const singlePrice = product.singlePrice || {};
         const comparativePrice = singlePrice.comparativePrice || {};
+        // (UPDATE, phase 7) Is it on special? See pakNSaveSpecial().
+        const special = pakNSaveSpecial(product);
 
         return {
             // Pak'nSave keeps the brand ("Pams", "Pams Value", "Wattie's")
@@ -1328,9 +1359,20 @@ async function searchPakNSave(searchTerm, storeName) {
             name: [product.brand, product.name].filter(Boolean).join(' '),
             // Pak'nSave gives prices in CENTS (1849 = $18.49), unlike
             // Woolworths' plain decimal dollars - divide by 100.
-            price: typeof singlePrice.price === 'number' ? singlePrice.price / 100 : null,
-            cupPrice: typeof comparativePrice.pricePerUnit === 'number' ? comparativePrice.pricePerUnit / 100 : null,
+            // (UPDATE, phase 7: singlePrice is the NORMAL price - a
+            // special is in "promotions" instead, so before this the
+            // normal price was saved even when it was on special. Now
+            // the special price (and its unit price) wins when there
+            // is one - see pakNSaveSpecial().)
+            price: special.price !== undefined ? special.price
+                : (typeof singlePrice.price === 'number' ? singlePrice.price / 100 : null),
+            cupPrice: special.cupPrice !== undefined ? special.cupPrice
+                : (typeof comparativePrice.pricePerUnit === 'number' ? comparativePrice.pricePerUnit / 100 : null),
             cupMeasure: comparativePrice.measureDescription || null,
+            isSpecial: special.isSpecial,
+            wasPrice: special.wasPrice || null,
+            specialType: special.specialType || null,
+            specialNote: special.specialNote || null,
             // e.g. "60g" - confirmed via a raw response dump. Note
             // this is a straightforward pack size for most products,
             // but Pak'nSave's cents-based pricing/comparative-price
@@ -1342,13 +1384,60 @@ async function searchPakNSave(searchTerm, storeName) {
             // e.g. "5001949-EA-000" (confirmed via a raw response dump).
             // The same code is used at every Pak'nSave and New World.
             // No barcode comes back with a search - that has to be
-            // linked separately (see linkStoreProducts() in database.js).
+            // linked separately (see linkBarcode() in database.js).
             productCode: product.productId || null,
             brand: product.brand || null
         };
     });
 }
 
+
+// -------------------------------------------------------------
+// (UPDATE, phase 7) Whether a Pak'nSave result is on special -
+// confirmed via a raw response dump. Each product has a list of
+// "promotions"; the one marked bestPromotion is the deal you'd get:
+// - rewardType NEW_PRICE, threshold 1, rewardValue (cents) below the
+//   normal price -> a special at that price, e.g. Bluebird chips $2.85
+//   -> $1.89 ("Limit 4 Assorted")
+// - threshold 2 or more -> a multibuy, e.g. 2 for $5. The single price
+//   stays the price; the deal goes in the note.
+// - cardDependencyFlag -> needs the Club card
+// A promotion at the SAME price as normal (Pak'nSave lists lots of
+// these) isn't a special.
+// Gives back e.g. { isSpecial: true, price: 1.89, cupPrice: 1.26,
+// wasPrice: 2.85, specialType: 'special', specialNote: 'Limit 4
+// Assorted' }, or just { isSpecial: false }.
+// -------------------------------------------------------------
+function pakNSaveSpecial(product) {
+    const normal = product.singlePrice && product.singlePrice.price;
+    const promo = (product.promotions || []).find(p => p.bestPromotion) || (product.promotions || [])[0];
+    if (!promo || typeof normal !== 'number' || typeof promo.rewardValue !== 'number' || promo.rewardType !== 'NEW_PRICE') {
+        return { isSpecial: false };
+    }
+
+    const club = Boolean(promo.cardDependencyFlag);
+    const threshold = promo.threshold || 1;
+
+    if (threshold > 1) {
+        return {
+            isSpecial: true,
+            specialType: 'multibuy',
+            specialNote: `${threshold} for $${(promo.rewardValue / 100).toFixed(2)}` + (promo.description ? ` (${promo.description})` : '')
+        };
+    }
+
+    if (promo.rewardValue >= normal) return { isSpecial: false };
+
+    const promoCup = promo.comparativePrice && promo.comparativePrice.pricePerUnit;
+    return {
+        isSpecial: true,
+        price: promo.rewardValue / 100,
+        cupPrice: typeof promoCup === 'number' ? promoCup / 100 : undefined,
+        wasPrice: normal / 100,
+        specialType: club ? 'club' : 'special',
+        specialNote: promo.description || null
+    };
+}
 
 // -------------------------------------------------------------
 // Searches Trents Wholesale for the given term. Unlike Woolworths/
@@ -1491,18 +1580,16 @@ function readPrices(callback) {
 //   in database.js), so from then on EVERY price with that code - old
 //   ones too - knows its barcode. If the linking goes wrong, the
 //   prices are still saved; it's just tried again next time.
+//
+// UPDATE, phase 7: through database.savePrices(), which finds each
+// price's product (by the store's chain + product code, or for Trents
+// by its saved name) and makes a new product if there isn't one yet -
+// every price points at a product now. A barcode the supermarket sends
+// is put on that product. Specials ride along too (is_special,
+// was_price, special_type, special_note - see productFieldsFrom()).
 // -------------------------------------------------------------
 function appendPrices(newPrices, callback) {
-    database.appendRows(PRICES_FILE, newPrices, err => {
-        if (err) return callback(err);
-
-        const links = newPrices
-            .filter(p => p.product_code && p.barcode)
-            .map(p => ({ store: p.store, product_code: p.product_code, barcode: p.barcode, brand: p.brand, product_name: p.original_name }));
-        if (links.length === 0) return callback(null);
-
-        database.linkStoreProducts(links, () => callback(null));
-    });
+    database.savePrices(newPrices, callback);
 }
 
 // -------------------------------------------------------------
@@ -1522,12 +1609,20 @@ function tidyBarcode(value) {
 // The phase 5 fields every way of saving a price passes on from a
 // search result (see appendPrices() above): the supermarket's product
 // code, plus the barcode and brand if it sent them.
+// (UPDATE, phase 7: plus the specials - whether it's on special, the
+// normal price, and what kind of special. The page sends them with the
+// snake_case names, a search result has the camelCase ones.)
 // -------------------------------------------------------------
 function productFieldsFrom(result) {
+    const isSpecial = result.isSpecial !== undefined ? result.isSpecial : result.is_special;
     return {
         product_code: result.productCode || result.product_code || '',
         barcode: tidyBarcode(result.barcode),
-        brand: result.brand || ''
+        brand: result.brand || '',
+        is_special: isSpecial === true || isSpecial === 'yes' ? 'yes' : '',
+        was_price: result.wasPrice !== undefined ? result.wasPrice : (result.was_price || ''),
+        special_type: result.specialType || result.special_type || '',
+        special_note: result.specialNote || result.special_note || ''
     };
 }
 

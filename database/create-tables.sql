@@ -1,5 +1,5 @@
 -- =============================================================
--- CREATE TABLES - the full pantry database (phase 5 design)
+-- CREATE TABLES - the full pantry database (phase 7 design)
 -- =============================================================
 -- For building a NEW, empty database (e.g. a pantry_dev copy for
 -- testing) - then run database/seed-ingredients.sql to add the
@@ -196,28 +196,6 @@ END;
 
 
 -- -------------------------------------------------------------
--- PRICES - every saved price, never changed or deleted, so the full
--- history is kept line by line.
--- -------------------------------------------------------------
-IF OBJECT_ID('dbo.prices', 'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.prices (
-        store_name    NVARCHAR(100) NOT NULL
-                      CONSTRAINT FK_prices_store REFERENCES dbo.stores(store_name) ON UPDATE CASCADE,
-        item_name     NVARCHAR(300) NOT NULL,   -- tidied name used for grouping (savedPriceName in server.js)
-        date_checked  DATETIMEOFFSET(3) NOT NULL,
-        price         DECIMAL(10,2) NULL,
-        cup_price     DECIMAL(10,2) NULL,
-        cup_measure   NVARCHAR(50)  NULL,
-        package_size  NVARCHAR(50)  NULL,
-        original_name NVARCHAR(300) NULL,       -- exactly as the supermarket wrote it
-        product_code  NVARCHAR(50)  NULL,       -- the supermarket's own code, see store_products
-        CONSTRAINT PK_prices PRIMARY KEY (store_name, item_name, date_checked)
-    );
-END;
-
-
--- -------------------------------------------------------------
 -- ACTIVITY LOG - who changed what, and when. logged_at is the exact
 -- time of the change; line_no numbers the rows one change wrote.
 -- -------------------------------------------------------------
@@ -241,25 +219,26 @@ END;
 
 
 -- -------------------------------------------------------------
--- PRODUCTS - one row per real product, keyed by its barcode, so the
--- next scan fills the form in straight away and the same product
--- lines up across supermarkets. Your name for it, its ingredient and
--- where it's kept come from scanning it at home; a product a
--- supermarket told us about can have none of those yet.
--- source = 'openfoodfacts' (found there), 'scanned' (you typed the
--- name after scanning), 'supermarket' (from a price check) or
--- 'typed' (added by hand / uploaded).
+-- PRODUCTS - one row per real product. product_id is its key; the
+-- barcode is optional but unique (most products come from price
+-- checks, and many never get one). Your name for it, its ingredient
+-- and where it's kept come from scanning it at home; brand,
+-- product_name and package_size from a supermarket.
+-- source = 'openfoodfacts', 'scanned', 'price check', 'supermarket'
+-- or 'typed'.
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.products', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.products (
-        barcode            NVARCHAR(50)  CONSTRAINT PK_products PRIMARY KEY,
+        product_id         INT IDENTITY(1,1) CONSTRAINT PK_products PRIMARY KEY,
+        barcode            NVARCHAR(50)  NULL,
         item_name          NVARCHAR(200) NULL,       -- your name for it, e.g. Tinned Tomatoes
         ingredient_name    NVARCHAR(200) NULL
                            CONSTRAINT FK_products_ingredient REFERENCES dbo.ingredients(ingredient_name) ON UPDATE CASCADE,
         brand              NVARCHAR(100) NULL,
-        product_name       NVARCHAR(300) NULL,       -- full name on the pack
-        quantity           DECIMAL(12,3) NULL,       -- pack size
+        product_name       NVARCHAR(300) NULL,       -- full name on the pack / at the supermarket
+        package_size       NVARCHAR(50)  NULL,
+        quantity           DECIMAL(12,3) NULL,       -- pack size, as a number and unit
         unit               NVARCHAR(20)  NULL,
         location_code      NVARCHAR(10)  NULL
                            CONSTRAINT FK_products_location REFERENCES dbo.locations(location_code) ON UPDATE CASCADE,
@@ -268,23 +247,54 @@ BEGIN
                            CONSTRAINT FK_products_person REFERENCES dbo.people(person_id),
         date_added         DATE NULL
     );
+    CREATE UNIQUE INDEX UQ_products_barcode ON dbo.products(barcode) WHERE barcode IS NOT NULL;
 END;
 
 
 -- -------------------------------------------------------------
 -- STORE PRODUCTS - each supermarket chain's own code for a product
--- (e.g. PAK'nSAVE "5001949-EA-000"), linked to its barcode. Per
--- chain, not per store: every branch uses the same code.
+-- (e.g. PAK'nSAVE "5001949-EA-000"), pointing at the product. Per
+-- chain, not per store: every branch uses the same code. Stores with
+-- no codes (Trents) use "name:" + the saved name instead.
 -- -------------------------------------------------------------
 IF OBJECT_ID('dbo.store_products', 'U') IS NULL
 BEGIN
     CREATE TABLE dbo.store_products (
-        chain        NVARCHAR(50) NOT NULL,
-        product_code NVARCHAR(50) NOT NULL,
-        barcode      NVARCHAR(50) NOT NULL
-                     CONSTRAINT FK_store_products_product REFERENCES dbo.products(barcode) ON UPDATE CASCADE,
+        chain        NVARCHAR(50)  NOT NULL,
+        product_code NVARCHAR(320) NOT NULL,
+        product_id   INT NOT NULL CONSTRAINT FK_store_products_product REFERENCES dbo.products(product_id),
         date_linked  DATE NULL,
         CONSTRAINT PK_store_products PRIMARY KEY (chain, product_code)
+    );
+END;
+
+
+-- -------------------------------------------------------------
+-- PRICES - every saved price, never changed or deleted, so the full
+-- history is kept line by line. One price per product, per store, per
+-- moment. price is what you'd pay; on special, was_price is the normal
+-- price and special_type says what kind (multibuy: price is still the
+-- single price, the deal is in special_note).
+-- -------------------------------------------------------------
+IF OBJECT_ID('dbo.prices', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.prices (
+        store_name    NVARCHAR(100) NOT NULL
+                      CONSTRAINT FK_prices_store REFERENCES dbo.stores(store_name) ON UPDATE CASCADE,
+        product_id    INT NOT NULL CONSTRAINT FK_prices_product REFERENCES dbo.products(product_id),
+        date_checked  DATETIMEOFFSET(3) NOT NULL,
+        item_name     NVARCHAR(300) NOT NULL,   -- tidied name used for grouping (savedPriceName in server.js)
+        price         DECIMAL(10,2) NULL,
+        cup_price     DECIMAL(10,2) NULL,
+        cup_measure   NVARCHAR(50)  NULL,
+        package_size  NVARCHAR(50)  NULL,
+        original_name NVARCHAR(300) NULL,       -- exactly as the supermarket wrote it
+        product_code  NVARCHAR(50)  NULL,       -- the supermarket's own code, see store_products
+        is_special    BIT NOT NULL CONSTRAINT DF_prices_is_special DEFAULT 0,
+        was_price     DECIMAL(10,2) NULL,
+        special_type  NVARCHAR(20)  NULL CONSTRAINT CK_prices_special_type CHECK (special_type IN ('special', 'club', 'multibuy')),
+        special_note  NVARCHAR(100) NULL,
+        CONSTRAINT PK_prices PRIMARY KEY (store_name, product_id, date_checked)
     );
 END;
 
@@ -343,3 +353,69 @@ WHERE NOT EXISTS (SELECT 1 FROM dbo.stores s WHERE s.store_name = v.store_name);
 SELECT name AS table_name, create_date
 FROM sys.tables
 ORDER BY name;
+GO
+
+
+-- -------------------------------------------------------------
+-- USP_LINK_BARCODE - links a barcode to a chain's product code.
+-- - neither known yet: a new product with that barcode, linked to the code
+-- - only the code known: that product gets the barcode
+-- - only the barcode known: the code is linked to that product
+-- - both known, but they're two different products: they're the same
+--   thing, so the code's product is folded into the barcode's one
+--   (its prices and codes move across, blanks are filled in, and it's
+--   deleted). The barcode's product is kept because it's the one
+--   scanned at home, with your name for it.
+-- -------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.usp_link_barcode
+    @chain        NVARCHAR(50),
+    @product_code NVARCHAR(320),
+    @barcode      NVARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'New Zealand Standard Time' AS DATE);
+
+    BEGIN TRANSACTION;
+
+    DECLARE @by_code INT = (SELECT product_id FROM dbo.store_products WITH (UPDLOCK, HOLDLOCK)
+                            WHERE chain = @chain AND product_code = @product_code);
+    DECLARE @by_barcode INT = (SELECT product_id FROM dbo.products WITH (UPDLOCK, HOLDLOCK) WHERE barcode = @barcode);
+
+    IF @by_code IS NULL AND @by_barcode IS NULL
+    BEGIN
+        INSERT INTO dbo.products (barcode, source, date_added) VALUES (@barcode, 'supermarket', @today);
+        SET @by_barcode = SCOPE_IDENTITY();
+    END;
+
+    IF @by_code IS NULL
+        INSERT INTO dbo.store_products (chain, product_code, product_id, date_linked)
+        VALUES (@chain, @product_code, @by_barcode, @today);
+    ELSE IF @by_barcode IS NULL
+        UPDATE dbo.products SET barcode = @barcode WHERE product_id = @by_code;
+    ELSE IF @by_code <> @by_barcode
+    BEGIN
+        UPDATE keep
+        SET item_name       = COALESCE(keep.item_name, gone.item_name),
+            ingredient_name = COALESCE(keep.ingredient_name, gone.ingredient_name),
+            brand           = COALESCE(keep.brand, gone.brand),
+            product_name    = COALESCE(keep.product_name, gone.product_name),
+            package_size    = COALESCE(keep.package_size, gone.package_size)
+        FROM dbo.products AS keep
+        CROSS JOIN dbo.products AS gone
+        WHERE keep.product_id = @by_barcode AND gone.product_id = @by_code;
+
+        UPDATE dbo.prices SET product_id = @by_barcode WHERE product_id = @by_code;
+        UPDATE dbo.store_products SET product_id = @by_barcode, date_linked = @today WHERE product_id = @by_code;
+        DELETE FROM dbo.products WHERE product_id = @by_code;
+    END;
+
+    COMMIT TRANSACTION;
+END;
+GO
+
+IF DATABASE_PRINCIPAL_ID('pantry_app') IS NOT NULL
+    GRANT EXECUTE ON OBJECT::dbo.usp_link_barcode TO pantry_app;
+GO

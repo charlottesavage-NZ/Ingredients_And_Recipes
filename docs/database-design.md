@@ -2,6 +2,7 @@
 
 The household data lives in the Azure SQL database `pantry` on `charlotte-inventory2.database.windows.net`. This page documents each version of the design, each as a crow's foot entity-relationship diagram and a UML class diagram:
 
+- **Phase 7** - every price points at a product, and specials are recorded (made by [`database/product-ids-upgrade.sql`](../database/product-ids-upgrade.sql))
 - **Phase 6** - the warehouse: a galaxy schema for reports, with real keys (made by [`database/warehouse.sql`](../database/warehouse.sql))
 - **Phase 5** - products by barcode, supermarket product codes, minimums on the ingredients table (made by [`database/products-upgrade.sql`](../database/products-upgrade.sql))
 - **Phase 4** - star schema views for price reports (made by [`database/reporting-views.sql`](../database/reporting-views.sql))
@@ -9,7 +10,7 @@ The household data lives in the Azure SQL database `pantry` on `charlotte-invent
 - **Phase 2** - people, stores and locations, natural and composite keys (made by [`database/archive/phase2-upgrade.sql`](../database/archive/phase2-upgrade.sql))
 - **Phase 1** - the tables first moved off the CSV files
 
-The table definitions for the newest design are in [`database/create-tables.sql`](../database/create-tables.sql). The diagrams are laid out by hand into the SVG files in [`docs/diagrams`](diagrams) - the website's tables as they are today are under Phase 5, and the reports warehouse under Phase 6.
+The table definitions for the newest design are in [`database/create-tables.sql`](../database/create-tables.sql). The diagrams are laid out by hand into the SVG files in [`docs/diagrams`](diagrams) - the website's tables as they are today are under Phase 7, and the reports warehouse under Phase 6.
 
 ## Reading the UML diagrams
 
@@ -42,6 +43,43 @@ Read across the line, using the number at the far end. Store 1 to Price 0..* mea
 ![Dashed arrow: "looked up by name"](diagrams/uml-dependency.svg)
 
 No foreign key - the website code finds the matching row by comparing names, and the arrow points at the table being looked up. After phase 3 only one is left: a watched product's price history.
+
+## Phase 7: every price points at a product
+
+- products gets a number key, product_id. The barcode is still on it - optional, and unique when it's there - because most products now come from price checks, and many never get a barcode (Trents, loose produce).
+- prices gets product_id, a foreign key: every price belongs to a product. Its key becomes store + product + moment - one price per product, per store, per moment.
+- store_products maps each chain's own product code to a product_id. Trents has no codes, so its saved name stands in ("name:Bulk Rice 10kg"); the same goes for prices saved before product codes existed.
+- Saving a price finds its product by the store's chain + product code, or makes a new one. A barcode links products: dbo.usp_link_barcode links a barcode to a code, and if that shows two product rows are really the same thing, it merges them - moving the prices and codes across - so the product's prices from every supermarket end up together.
+- Specials: prices gets is_special, was_price (the normal price), special_type (special, club, multibuy) and special_note ("SAVE $1.50", "Limit 4 Assorted"). price is always what you'd pay. Woolworths sends isSpecial / wasPrice / isClubPrice; PAK'nSAVE sends a list of promotions (before phase 7 its normal price was saved even when it was on special).
+- The dotted line between prices and store_products is gone - it's a real foreign key through products now. The only link still made by the website code is a watched product finding its price history.
+- Why a number key here, when everything else is keyed by its real-world identity: a product without a barcode has no natural key. This follows the same idea as a real price comparison site's model - one shared product identity that every price points at.
+
+### The website's tables today
+
+The whole design on one page, keys only - every primary key (PK), foreign key (FK) and unique key (UK), and every relationship between them:
+
+![Phase 7 website tables - overview, keys only](diagrams/p7-overview.svg)
+
+The same tables split into the four things the site does, with every column. A faded, dashed table belongs to another area and is only there to show what it links to.
+
+- A line ending in a bar and a circle (zero or one) is an optional link: the column can be empty, e.g. a log line with nobody logged in.
+- A dotted line is matched in the website code, not by a foreign key.
+
+**Stock** - what's in the house, the master list of ingredients, and products
+
+![Phase 7 stock tables](diagrams/p7-stock.svg)
+
+**Recipes** - recipes, their ingredients, votes and the meal plan
+
+![Phase 7 recipe tables](diagrams/p7-recipes.svg)
+
+**Prices** - stores, saved prices, the watch list, and supermarket product codes. Dotted line: a watched product finds its price history by store and name.
+
+![Phase 7 price tables](diagrams/p7-prices.svg)
+
+**People** - who can log in, the activity log, and everything that records who did it
+
+![Phase 7 people tables](diagrams/p7-people.svg)
 
 ## Phase 6: the warehouse (a galaxy schema)
 
@@ -81,10 +119,10 @@ The shared ("conformed") dimensions are what link the stars together: dim_ingred
 | `dim_chain` | `chain_key` | chain_name (UK) |
 | `dim_store` | `store_key` | store_name (UK), chain_key (FK), suburb, is_main_store, is_preferred, is_active, is_current |
 | `dim_ingredient` | `ingredient_key` | ingredient_name (UK), source, tin_quantity, tin_unit, minimum_quantity, minimum_unit, has_minimum, is_current |
-| `dim_product` | `product_key` | product_ref (UK: "barcode:..." or "name:..."), barcode, product_name, brand, ingredient_key (FK), is_home_brand, is_current |
+| `dim_product` | `product_key` | product_id (UK, since phase 7), barcode, product_name, brand, package_size, ingredient_key (FK), is_home_brand, is_current |
 | `dim_recipe` | `recipe_key` | recipe_id (UK), recipe_name, servings, is_current |
 | `dim_activity_type` | `activity_type_key` | action (UK), category (stock in, stock out, stock change, running low, minimum, recipe, other), direction (+1, -1, 0) |
-| `fact_price` | `store_key + saved_name + checked_at` | date_key, product_key, checked_at_nz, price, cup_price, cup_measure, package_size, original_name, product_code, change_since_last_check |
+| `fact_price` | `store_key + product_key + checked_at` | date_key, saved_name, checked_at_nz, price, cup_price, cup_measure, package_size, original_name, product_code, is_special, was_price, special_type, special_note, change_since_last_check |
 | `fact_activity` | `logged_at + line_no` | date_key, person_key, location_key, ingredient_key, activity_type_key, logged_at_nz, item_as_typed, quantity, unit, signed_quantity, details |
 | `fact_stock_snapshot` | `date_key + location_key + item_name + unit` | ingredient_key, quantity, is_low |
 | `fact_recipe_ingredient` | `recipe_key + line_no` | ingredient_key, name_as_written, quantity, unit |
@@ -108,9 +146,9 @@ The shared ("conformed") dimensions are what link the stars together: dim_ingred
 - "Home Brand" is gone: prices keep their real brand (Pams, Woolworths Essentials). The upgrade put the real brand back on the 123 prices saved as "Home Brand ...", from the supermarket's own name in original_name. Pams and Woolworths own-brand products never share a barcode, so comparing those is done by their ingredient instead.
 - Still 15 tables: products replaces barcodes, store_products replaces stock_minimums.
 
-### The website's tables today
+### The website's tables in phase 5
 
-The whole design on one page, keys only - every primary key (PK), foreign key (FK) and unique key (UK), and every relationship between them:
+Superseded by phase 7 above - kept to show how it got there.
 
 ![Phase 5 website tables - overview, keys only](diagrams/p5-overview.svg)
 

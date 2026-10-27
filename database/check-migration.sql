@@ -1,7 +1,7 @@
 -- =============================================================
 -- CHECK THE DATA - run in SSMS on the pantry database, e.g. after
 -- an upgrade (see database/archive), to see the data
--- is all there. (Updated for the phase 5 tables.)
+-- is all there. (Updated for the phase 7 tables.)
 -- =============================================================
 
 -- Row count per table
@@ -21,6 +21,8 @@ UNION ALL SELECT 'ingredients with a minimum', COUNT(*) FROM dbo.ingredients WHE
 UNION ALL SELECT 'products', COUNT(*) FROM dbo.products
 UNION ALL SELECT 'store_products', COUNT(*) FROM dbo.store_products
 UNION ALL SELECT 'prices with a product code', COUNT(*) FROM dbo.prices WHERE product_code IS NOT NULL
+UNION ALL SELECT 'prices on special', COUNT(*) FROM dbo.prices WHERE is_special = 1
+UNION ALL SELECT 'products with a barcode', COUNT(*) FROM dbo.products WHERE barcode IS NOT NULL
 UNION ALL SELECT 'watch_list', COUNT(*) FROM dbo.watch_list;
 
 -- Stock per storage area
@@ -64,10 +66,12 @@ FROM dbo.ingredients
 WHERE minimum_quantity IS NOT NULL
 ORDER BY ingredient_name;
 
--- Each supermarket product code linked to a barcode, with the product
-SELECT sp.chain, sp.product_code, sp.barcode, p.brand, p.product_name, p.item_name, sp.date_linked
+-- Each supermarket product code with its product (and barcode, if
+-- it has one) and how many prices it has
+SELECT sp.chain, sp.product_code, p.product_id, p.barcode, p.brand, p.product_name, p.item_name, sp.date_linked,
+       (SELECT COUNT(*) FROM dbo.prices pr WHERE pr.product_id = p.product_id) AS prices
 FROM dbo.store_products sp
-JOIN dbo.products p ON p.barcode = sp.barcode
+JOIN dbo.products p ON p.product_id = sp.product_id
 ORDER BY p.product_name, sp.chain;
 
 -- Ingredients you've added yourself (anything not in the built-in list)

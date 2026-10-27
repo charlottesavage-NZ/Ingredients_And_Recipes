@@ -284,6 +284,9 @@ function renderResults(results) {
 
         const priceCell = document.createElement('td');
         priceCell.textContent = `$${result.price}`;
+        // (UPDATE, phase 7) On special? Say so under the price - see
+        // specialText().
+        addSpecialNote(priceCell, result.isSpecial, result.wasPrice, result.specialType, result.specialNote);
 
         const unitPriceCell = document.createElement('td');
         unitPriceCell.textContent = unitPriceText;
@@ -322,6 +325,26 @@ function renderResults(results) {
 }
 
 // -------------------------------------------------------------
+// (UPDATE, phase 7) Adds a small note under a price that's on
+// special, e.g. "Special - was $7.19 (SAVE $1.50)", "Club price - was
+// $2.85" or "Multibuy: 2 for $5.00". Nothing is added for a normal
+// price.
+// -------------------------------------------------------------
+function addSpecialNote(cell, isSpecial, wasPrice, specialType, specialNote) {
+    if (!isSpecial) return;
+
+    const label = specialType === 'club' ? 'Club price' : specialType === 'multibuy' ? 'Multibuy' : 'Special';
+    let text = label;
+    if (wasPrice) text += ` - was $${Number(wasPrice).toFixed(2)}`;
+    if (specialNote) text += specialType === 'multibuy' && !wasPrice ? `: ${specialNote}` : ` (${specialNote})`;
+
+    const note = document.createElement('small');
+    note.classList.add('price-special');
+    note.textContent = text;
+    cell.appendChild(note);
+}
+
+// -------------------------------------------------------------
 // Sends one specific product's price to the server to be added
 // as a new row in the ongoing price history CSV.
 // -------------------------------------------------------------
@@ -341,7 +364,12 @@ function savePrice(result) {
             // them - so the saved price can be linked to the real product.
             product_code: result.productCode,
             barcode: result.barcode,
-            brand: result.brand
+            brand: result.brand,
+            // (UPDATE, phase 7) whether it's on special, and the details
+            is_special: result.isSpecial,
+            was_price: result.wasPrice,
+            special_type: result.specialType,
+            special_note: result.specialNote
         })
     })
         .then(response => response.json())
@@ -580,6 +608,8 @@ function renderPriceHistory() {
     const groupDescriptions = new Map();
     // The box's name WITHOUT the size added on - see buildHistoryTable().
     const groupBaseNames = new Map();
+    // (UPDATE, phase 7) Which box each product's prices go in.
+    const productBoxes = new Map();
     //
     // The pack SIZE has to match as well - Red Bull 250ml from two
     // stores share a box, but Red Bull 475ml gets a box of its own.
@@ -588,20 +618,20 @@ function renderPriceHistory() {
         const sizeKey = normalizeSize(entry.package_size);
         let key = entry.item_name.toLowerCase().replace(/\s+/g, ' ').trim() + '|' + sizeKey;
 
-        // (UPDATE, phase 5) A price whose supermarket product code has
-        // been linked to a barcode goes in that barcode's box - so the
-        // same product from every supermarket shares one box, however
-        // each one words it. It never fuzzy-joins a box by name (the
-        // barcode is the better answer); prices WITHOUT a barcode still
-        // can join a barcode's box below, if their name is close enough.
-        if (entry.barcode) {
-            key = 'barcode|' + entry.barcode;
-            if (!groups.has(key)) {
-                groups.set(key, []);
-                groupTitles.set(key, entry.package_size ? `${entry.item_name} (${entry.package_size})` : entry.item_name);
-                groupBaseNames.set(key, entry.item_name);
-                groupDescriptions.set(key, { description: describeProductName(entry.item_name), sizeKey });
-            }
+        // (UPDATE, phase 5: a price linked to a barcode went in that
+        // barcode's box here.)
+        // (UPDATE, phase 7: every price now points at a product, and a
+        // barcode merges products, so this goes by PRODUCT instead: once
+        // one price for a product has found its box, every other price
+        // for the same product goes straight into that box too - e.g. the
+        // same product at two Pak'nSave stores, or at Woolworths and
+        // Pak'nSave once a barcode has linked them. The first price for
+        // each product still finds its box by name, below, so different
+        // supermarkets' products that AREN'T linked yet still join up by
+        // name the same way as before.)
+        if (entry.product_id && productBoxes.has(entry.product_id)) {
+            groups.get(productBoxes.get(entry.product_id)).push(entry);
+            return;
         }
 
         // Not an exact match for an existing box? See if it's a close
@@ -637,6 +667,8 @@ function renderPriceHistory() {
             }
         }
         groups.get(key).push(entry);
+        // (UPDATE, phase 7) Remember this product's box - see above.
+        if (entry.product_id) productBoxes.set(entry.product_id, key);
     });
 
     if (groups.size === 0) {
@@ -816,6 +848,9 @@ function buildHistoryTable(entriesForDay, groupTitle) {
 
         const priceCell = document.createElement('td');
         priceCell.textContent = `$${entry.price}`;
+        // (UPDATE, phase 7) Same "Special - was $x" note as the live
+        // results. Prices saved before phase 7 never have one.
+        addSpecialNote(priceCell, entry.is_special === 'yes', entry.was_price, entry.special_type, entry.special_note);
 
         const unitPriceCell = document.createElement('td');
         unitPriceCell.textContent = unitPriceText;
@@ -986,7 +1021,12 @@ function watchProduct(result, button) {
             // (UPDATE, phase 5) same as savePrice() above
             product_code: result.productCode,
             barcode: result.barcode,
-            brand: result.brand
+            brand: result.brand,
+            // (UPDATE, phase 7) same as savePrice() above
+            is_special: result.isSpecial,
+            was_price: result.wasPrice,
+            special_type: result.specialType,
+            special_note: result.specialNote
         })
     })
         .then(response => {

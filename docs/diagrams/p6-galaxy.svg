@@ -56,9 +56,9 @@
 <text x="718" y="88" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">store_key</text>
 <text x="900" y="88" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
 <rect x="661" y="94" width="248" height="20" fill="#f4f8fa"/>
-<text x="670" y="108" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
-<text x="718" y="108" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">saved_name</text>
-<text x="900" y="108" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(300)</text>
+<text x="670" y="108" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK FK</text>
+<text x="718" y="108" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">product_key</text>
+<text x="900" y="108" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
 <text x="670" y="128" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">PK</text>
 <text x="718" y="128" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">checked_at</text>
 <text x="900" y="128" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">datetimeoffset</text>
@@ -66,9 +66,9 @@
 <text x="670" y="148" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">FK</text>
 <text x="718" y="148" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">date_key</text>
 <text x="900" y="148" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
-<text x="670" y="168" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">FK</text>
-<text x="718" y="168" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">product_key</text>
-<text x="900" y="168" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
+<text x="670" y="168" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84"></text>
+<text x="718" y="168" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">is_special</text>
+<text x="900" y="168" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">bit</text>
 </g>
 <g>
 <rect x="660" y="250" width="250" height="78" rx="4" fill="#ffffff" stroke="#1c6a84" stroke-width="1.4"/>
@@ -185,8 +185,8 @@
 <text x="1210" y="638" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
 <rect x="971" y="644" width="248" height="20" fill="#f4f8fa"/>
 <text x="980" y="658" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">UK</text>
-<text x="1028" y="658" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">product_ref</text>
-<text x="1210" y="658" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">nvarchar(320)</text>
+<text x="1028" y="658" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">product_id</text>
+<text x="1210" y="658" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>
 <text x="980" y="678" font-size="11" font-weight="700" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#1c6a84">FK</text>
 <text x="1028" y="678" font-size="12" font-family="Segoe UI, Helvetica, Arial, sans-serif" fill="#17242c">ingredient_key</text>
 <text x="1210" y="678" text-anchor="end" font-size="11" font-family="Consolas, 'Cascadia Mono', Menlo, monospace" fill="#5a6d78">int</text>

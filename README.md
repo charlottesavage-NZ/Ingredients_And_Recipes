@@ -45,6 +45,7 @@ This is intended to help with a couple of issues:
 
 **Price Checker**
 - Live price searches at Woolworths, PAK'nSAVE and Trents Wholesale (or all three at once), sortable by price or unit price.
+- Specials are picked up from both supermarkets and shown under the price ("Special - was $7.19 (SAVE $1.50)", club prices, multibuys).
 - Saved price history grouped by product across stores, with a price graph. Each saved price keeps the supermarket's own product code; once that code is linked to a barcode, the same product from every supermarket shares one box.
 - **Watch list**: star a product and the server re-checks its price every morning by itself. It shows "Price drop" and "Lowest price we've seen" badges.
 
@@ -56,8 +57,8 @@ This is intended to help with a couple of issues:
 ## How it's built
 
 - **No framework.** Plain HTML, CSS and JavaScript pages, and one Node.js server (`server.js`) using Node's built-in `http` module.
-- **Data is stored in an Azure SQL Database** (Microsoft SQL Server in the cloud, on the free offer). There are 15 tables: people, stores, storage locations, a master list of ingredients (which also holds each stock minimum) and products (keyed by barcode), plus inventory, recipes, recipe ingredients, votes, aliases, prices, store products (each supermarket's product code linked to a barcode), the activity log, the meal plan and the watch list. See `database/create-tables.sql`, and [`docs/database-design.md`](docs/database-design.md) for the crow's foot and UML diagrams.
-  - Only `people` has a number id. Every other table is keyed by its real-world identity, with composite keys where one column isn't enough (stock is keyed on storage area + name + unit, prices on store + product + time, products on their barcode, store products on chain + the supermarket's product code).
+- **Data is stored in an Azure SQL Database** (Microsoft SQL Server in the cloud, on the free offer). There are 15 tables: people, stores, storage locations, a master list of ingredients (which also holds each stock minimum) and products (every price points at one; the barcode is optional), plus inventory, recipes, recipe ingredients, votes, aliases, prices, store products (each supermarket's product code linked to a product), the activity log, the meal plan and the watch list. See `database/create-tables.sql`, and [`docs/database-design.md`](docs/database-design.md) for the crow's foot diagrams.
+  - Only `people` and `products` have number ids - a product without a barcode has no natural key, so every price points at a product_id and the barcode is an optional unique column. Every other table is keyed by its real-world identity, with composite keys where one column isn't enough (stock is keyed on storage area + name + unit, prices on store + product + time, store products on chain + the supermarket's product code).
   - `server.js` still works with names ("Todd", "Woolworths Ferrymead"). `database.js` swaps them for keys inside the SQL.
   - Stock, recipe ingredients and products keep the name as typed, plus a link to the ingredient it counts as ("Diced Tomatoes" -> "Tinned Tomatoes"). The built-in aliases, tin sizes and suggestion names live in the `ingredients` and `ingredient_aliases` tables.
   - Each save is one T-SQL batch in a single transaction. The rows are sent as JSON and unpacked with `OPENJSON`, so a save is all-or-nothing.
@@ -77,6 +78,7 @@ This is intended to help with a couple of issues:
 | `server.js` | The whole back end: reading and saving data, login, scrapers, recipe import, meal plan, watch list |
 | `database.js` | Everything that talks to Azure SQL: which table each kind of data lives in, reads, transactional saves, retries |
 | `database/create-tables.sql` | Creates all the tables in a new, empty database, with the starting people, stores and storage areas |
+| `database/product-ids-upgrade.sql` | One-off upgrade to phase 7: products get a number id, every price points at a product, specials, and the barcode-linking procedure |
 | `database/products-upgrade.sql` | One-off upgrade to phase 5: products by barcode, supermarket product codes, minimums on the ingredients table, real brands back on "Home Brand" prices |
 | `database/archive/` | The one-off upgrade scripts that have already been run (phase 2, and phase 3's ingredients table), kept for the record |
 | `database/seed-ingredients.sql` | The built-in ingredients and aliases, for a new database (run after `create-tables.sql`) |
@@ -216,3 +218,15 @@ New tables only, in their own `dw` schema - the website's tables don't change, s
 2. Push the phase 6 code, then run update-pantry on the garage. From then on the site refreshes the warehouse every morning after the watch list check.
 3. In SSMS you can draw it: expand **pantry -> Database Diagrams -> New Database Diagram** and add the `dw` tables - the foreign keys draw the lines.
 4. In Power BI, load the `dw` tables instead of the `reporting` views (see `docs/database-design.md`).
+
+### Upgrading the live database to phase 7: every price points at a product (one-off)
+
+Same pattern as phases 2, 3 and 5 - the tables and the code change together, so the site is stopped for a few minutes.
+
+1. In SSMS, take a backup copy: right-click `pantry` -> **Tasks -> Export Data-tier Application**.
+2. On the garage: `systemctl stop ingredients-recipes-update.timer && systemctl stop ingredients-recipes`.
+3. In SSMS, right-click **pantry -> New Query** (the yellow bar must say `pantry`), paste in `database/product-ids-upgrade.sql` and run it. It's one transaction - if anything fails, nothing changes. It ends with the row counts and the 20 most-checked products.
+4. Re-run `database/warehouse.sql` the same way - it rebuilds the warehouse's product dimension and price fact on product_id.
+5. Push the phase 7 code from your PC, then run update-pantry on the garage.
+6. `systemctl start ingredients-recipes-update.timer`.
+7. In SSMS, run `database/check-migration.sql`, and try the site: search for something on special and save it.

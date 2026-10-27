@@ -131,18 +131,17 @@ CREATE TABLE dw.dim_ingredient (
 );
 GO
 
--- DIM_PRODUCT - each product prices were saved for, pointing at its
--- ingredient (snowflake). product_ref is the business key: the
--- barcode once the supermarket's code is linked to one
--- ("barcode:9415221000123"), otherwise the saved name ("name:Pams
--- Diced Tomatoes"). Every barcode in dbo.products is here too.
+-- DIM_PRODUCT - each product, pointing at its ingredient (snowflake).
+-- product_id is the website's key for it. (Phase 7: every price points
+-- at a product now, so this is a straight copy of dbo.products.)
 IF OBJECT_ID('dw.dim_product', 'U') IS NULL
 CREATE TABLE dw.dim_product (
     product_key    INT IDENTITY(1,1) CONSTRAINT PK_dim_product PRIMARY KEY,
-    product_ref    NVARCHAR(320) NOT NULL CONSTRAINT UQ_dim_product_ref UNIQUE,
+    product_id     INT           NOT NULL CONSTRAINT UQ_dim_product_id UNIQUE,
     barcode        NVARCHAR(50)  NULL,
     product_name   NVARCHAR(300) NOT NULL,
     brand          NVARCHAR(100) NULL,
+    package_size   NVARCHAR(50)  NULL,
     ingredient_key INT NOT NULL CONSTRAINT FK_dim_product_ingredient REFERENCES dw.dim_ingredient(ingredient_key),
     is_home_brand  BIT NOT NULL,
     is_current     BIT NOT NULL
@@ -224,14 +223,16 @@ GO
 -- item_name etc. are "degenerate dimensions": identifying values
 -- kept on the fact, with no table of their own.
 
--- FACT_PRICE - one row per saved price.
+-- FACT_PRICE - one row per saved price: one product, at one store, at
+-- one moment. is_special / was_price / special_type say whether it
+-- was on special (phase 7 onwards - older prices are all 0).
 IF OBJECT_ID('dw.fact_price', 'U') IS NULL
 CREATE TABLE dw.fact_price (
     store_key     INT NOT NULL CONSTRAINT FK_fact_price_store REFERENCES dw.dim_store(store_key),
-    saved_name    NVARCHAR(300) NOT NULL,
+    product_key   INT NOT NULL CONSTRAINT FK_fact_price_product REFERENCES dw.dim_product(product_key),
     checked_at    DATETIMEOFFSET(3) NOT NULL,
     date_key      INT NOT NULL CONSTRAINT FK_fact_price_date REFERENCES dw.dim_date(date_key),
-    product_key   INT NOT NULL CONSTRAINT FK_fact_price_product REFERENCES dw.dim_product(product_key),
+    saved_name    NVARCHAR(300) NOT NULL,
     checked_at_nz DATETIME2(0) NOT NULL,
     price         DECIMAL(10,2) NULL,
     cup_price     DECIMAL(10,2) NULL,
@@ -239,8 +240,12 @@ CREATE TABLE dw.fact_price (
     package_size  NVARCHAR(50)  NULL,
     original_name NVARCHAR(300) NULL,
     product_code  NVARCHAR(50)  NULL,
+    is_special    BIT NOT NULL,
+    was_price     DECIMAL(10,2) NULL,
+    special_type  NVARCHAR(20)  NULL,
+    special_note  NVARCHAR(100) NULL,
     change_since_last_check DECIMAL(10,2) NULL,
-    CONSTRAINT PK_fact_price PRIMARY KEY (store_key, saved_name, checked_at)
+    CONSTRAINT PK_fact_price PRIMARY KEY (store_key, product_key, checked_at)
 );
 GO
 
@@ -423,49 +428,23 @@ BEGIN
     SELECT DISTINCT a.action, 'other', 0 FROM dbo.activity_log AS a
     WHERE NOT EXISTS (SELECT 1 FROM dw.dim_activity_type AS t WHERE t.action = a.action);
 
-    -- ---- Each price with the product it belongs to. If any price for
-    -- the same store and saved name has its product code linked to a
-    -- barcode, they all count as that barcode's product - so older
-    -- prices saved before the link (or before phase 5) join up too.
-    SELECT p.store_name, p.item_name, p.date_checked, p.price, p.cup_price, p.cup_measure,
-           p.package_size, p.original_name, p.product_code, l.barcode,
-           CAST(CASE WHEN l.barcode IS NOT NULL THEN N'barcode:' + l.barcode ELSE N'name:' + p.item_name END AS NVARCHAR(320)) AS product_ref
-    INTO #price
-    FROM dbo.prices AS p
-    CROSS APPLY (
-        SELECT MAX(sp.barcode) AS barcode
-        FROM dbo.prices AS same
-        JOIN dbo.stores AS st ON st.store_name = same.store_name
-        JOIN dbo.store_products AS sp ON sp.chain = st.chain AND sp.product_code = same.product_code
-        WHERE same.store_name = p.store_name AND same.item_name = p.item_name
-    ) AS l;
-
-    -- ---- dim_product: every barcode product, plus every saved name
-    -- that isn't linked to a barcode yet
+    -- ---- dim_product: every product (phase 7 - every price points at
+    -- one). Its name: your name for it, else the supermarket's.
     MERGE dw.dim_product AS t
     USING (
-        SELECT src.product_ref, src.barcode, src.product_name, src.brand,
+        SELECT pr.product_id, pr.barcode,
+               COALESCE(pr.item_name, pr.product_name, pr.barcode, CONCAT('Product ', pr.product_id)) AS product_name,
+               pr.brand, pr.package_size,
                ISNULL(i.ingredient_key, -1) AS ingredient_key,
-               CASE WHEN src.product_name LIKE 'Pams %' OR src.product_name LIKE 'Woolworths %'
-                         OR src.brand LIKE 'Pams%' OR src.brand LIKE 'Woolworths%' THEN 1 ELSE 0 END AS is_home_brand
-        FROM (
-            SELECT N'barcode:' + pr.barcode AS product_ref, pr.barcode,
-                   COALESCE(pr.item_name, pr.product_name,
-                            (SELECT TOP 1 x.item_name FROM #price AS x WHERE x.barcode = pr.barcode ORDER BY x.date_checked DESC),
-                            pr.barcode) AS product_name,
-                   pr.brand, pr.ingredient_name
-            FROM dbo.products AS pr
-            UNION ALL
-            SELECT DISTINCT x.product_ref, NULL, x.item_name, NULL, NULL
-            FROM #price AS x
-            WHERE x.barcode IS NULL
-        ) AS src
-        LEFT JOIN dw.dim_ingredient AS i ON i.ingredient_name = src.ingredient_name
-    ) AS s ON t.product_ref = s.product_ref
-    WHEN MATCHED THEN UPDATE SET barcode = s.barcode, product_name = s.product_name, brand = s.brand,
+               CASE WHEN pr.product_name LIKE 'Pams %' OR pr.product_name LIKE 'Woolworths %'
+                         OR pr.brand LIKE 'Pams%' OR pr.brand LIKE 'Woolworths%' THEN 1 ELSE 0 END AS is_home_brand
+        FROM dbo.products AS pr
+        LEFT JOIN dw.dim_ingredient AS i ON i.ingredient_name = pr.ingredient_name
+    ) AS s ON t.product_id = s.product_id
+    WHEN MATCHED THEN UPDATE SET barcode = s.barcode, product_name = s.product_name, brand = s.brand, package_size = s.package_size,
         ingredient_key = s.ingredient_key, is_home_brand = s.is_home_brand, is_current = 1
-    WHEN NOT MATCHED BY TARGET THEN INSERT (product_ref, barcode, product_name, brand, ingredient_key, is_home_brand, is_current)
-        VALUES (s.product_ref, s.barcode, s.product_name, s.brand, s.ingredient_key, s.is_home_brand, 1)
+    WHEN NOT MATCHED BY TARGET THEN INSERT (product_id, barcode, product_name, brand, package_size, ingredient_key, is_home_brand, is_current)
+        VALUES (s.product_id, s.barcode, s.product_name, s.brand, s.package_size, s.ingredient_key, s.is_home_brand, 1)
     WHEN NOT MATCHED BY SOURCE THEN UPDATE SET is_current = 0;
 
     -- ---- The facts (dimensions are never deleted, so facts go first)
@@ -476,17 +455,19 @@ BEGIN
     DELETE FROM dw.fact_meal_plan;
     DELETE FROM dw.fact_stock_snapshot WHERE date_key = @today_key;
 
-    INSERT INTO dw.fact_price (store_key, saved_name, checked_at, date_key, product_key, checked_at_nz, price, cup_price,
-                               cup_measure, package_size, original_name, product_code, change_since_last_check)
-    SELECT ds.store_key, x.item_name, x.date_checked,
+    INSERT INTO dw.fact_price (store_key, product_key, checked_at, date_key, saved_name, checked_at_nz, price, cup_price,
+                               cup_measure, package_size, original_name, product_code, is_special, was_price,
+                               special_type, special_note, change_since_last_check)
+    SELECT ds.store_key, dp.product_key, x.date_checked,
            CONVERT(INT, CONVERT(CHAR(8), CAST(x.date_checked AT TIME ZONE 'New Zealand Standard Time' AS DATE), 112)),
-           dp.product_key,
+           x.item_name,
            CAST(x.date_checked AT TIME ZONE 'New Zealand Standard Time' AS DATETIME2(0)),
            x.price, x.cup_price, x.cup_measure, x.package_size, x.original_name, x.product_code,
-           x.price - LAG(x.price) OVER (PARTITION BY x.store_name, x.product_ref ORDER BY x.date_checked)
-    FROM #price AS x
+           x.is_special, x.was_price, x.special_type, x.special_note,
+           x.price - LAG(x.price) OVER (PARTITION BY x.store_name, x.product_id ORDER BY x.date_checked)
+    FROM dbo.prices AS x
     JOIN dw.dim_store AS ds ON ds.store_name = x.store_name
-    JOIN dw.dim_product AS dp ON dp.product_ref = x.product_ref;
+    JOIN dw.dim_product AS dp ON dp.product_id = x.product_id;
 
     -- A log line's item is the name as typed, so it's matched to an
     -- ingredient the way the site would: the ingredient itself, then an

@@ -516,6 +516,14 @@ option {
     color: var(--text-muted);
 }
 
+/* (UPDATE, phase 7) "Special - was $7.19" under a price that's on
+   special, in the same small text, picked out in the success green. */
+.price-special {
+    display: block;
+    font-size: 0.8em;
+    color: var(--success);
+}
+
 /* On a phone, tighten up the table so all four columns fit
    without needing to scroll sideways. */
 @media (max-width: 480px) {

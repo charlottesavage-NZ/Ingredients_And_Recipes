@@ -35,11 +35,23 @@
 //   keyed by its barcode. server.js calls it 'products' now.
 // - store_products links each supermarket chain's own product code
 //   (e.g. PAK'nSAVE's "5001949-EA-000") to a barcode - see
-//   linkStoreProducts() at the bottom of this file
+//   linkStoreProducts() (replaced in phase 7 - see below)
 // - every saved price keeps that product code, and reading prices
 //   hands back the barcode it links to (if it's been linked yet)
 // - the minimums moved onto the ingredients table, but server.js still
 //   reads and saves them as 'stock_minimums.csv' (see setColumns below)
+//
+// UPDATE, phase 7: every price points at a product
+// (database/product-ids-upgrade.sql).
+// - products has a number key, product_id, and the barcode is optional
+//   (most products now come from price checks, and many never get one)
+// - store_products links each chain's product code to a product_id.
+//   Stores with no codes (Trents) use "name:" + the saved name instead.
+// - prices are saved by savePrices() at the bottom of this file, which
+//   finds (or makes) each price's product first. Prices also record
+//   specials: is_special, was_price, special_type, special_note.
+// - linkBarcode() runs dbo.usp_link_barcode, which links a barcode to a
+//   product code - merging two products when they turn out to be one
 //
 // The free Azure SQL Database pauses itself when nobody's using it,
 // and every minute it's awake counts against the free monthly
@@ -256,10 +268,15 @@ const TABLES = {
         ]
     },
 
+    // (UPDATE, phase 7: read through this, but SAVED by savePrices() -
+    // a new price needs its product found or made first, which the
+    // general save code can't do. uniqueTime is used by savePrices():
+    // a price is one product at one store at one moment, so two rows for
+    // the same product in the same millisecond get moved apart.)
     'prices.csv': {
         table: 'dbo.prices',
         addMissingStores: 'store',
-        uniqueTime: { key: ['store', 'item_name'], time: 'date_checked' },
+        uniqueTime: { key: ['store', 'product_code', 'item_name'], time: 'date_checked' },
         orderBy: 'date_checked',
         columns: [
             { csv: 'store', column: 'store_name', type: 'NVARCHAR(100)', kind: 'text', required: true, lookup: STORE_LOOKUP },
@@ -274,14 +291,20 @@ const TABLES = {
             // product, e.g. PAK'nSAVE "5001949-EA-000" - blank for Trents
             // and for prices saved before phase 5.
             { csv: 'product_code', type: 'NVARCHAR(50)', kind: 'text' },
-            // The barcode that code is linked to in store_products (via
-            // the store's chain), or blank if it hasn't been linked yet.
-            // Read-only - links are saved by linkStoreProducts().
-            {
-                csv: 'barcode', kind: 'text',
-                readSql: '(SELECT TOP 1 sp.barcode FROM dbo.store_products AS sp JOIN dbo.stores AS st ON st.chain = sp.chain ' +
-                    'WHERE st.store_name = t.store_name AND sp.product_code = t.product_code)'
-            }
+            // (UPDATE, phase 7) The product this price is for, and that
+            // product's barcode - blank until one is linked (see
+            // linkBarcode()). Read-only here; savePrices() fills in
+            // product_id.
+            { csv: 'product_id', kind: 'text', readSql: 't.product_id' },
+            { csv: 'barcode', kind: 'text', readSql: '(SELECT p.barcode FROM dbo.products AS p WHERE p.product_id = t.product_id)' },
+            // (UPDATE, phase 7) Specials. price is always what you'd
+            // actually pay; on special, was_price is the normal price.
+            // special_type: 'special', 'club' (needs the club card) or
+            // 'multibuy' (e.g. 2 for $5 - price is still the single price).
+            { csv: 'is_special', type: 'BIT', kind: 'yesno', required: true },
+            { csv: 'was_price', type: 'DECIMAL(10,2)', kind: 'number' },
+            { csv: 'special_type', type: 'NVARCHAR(20)', kind: 'text' },
+            { csv: 'special_note', type: 'NVARCHAR(100)', kind: 'text' }
         ]
     },
 
@@ -326,11 +349,16 @@ const TABLES = {
     // (UPDATE, phase 5: was 'barcodes.csv' / dbo.barcodes. The name and
     // ingredient are optional now - a product learned from a supermarket
     // has neither until someone scans it at home.)
+    // (UPDATE, phase 7: products are keyed by product_id now, and only
+    // some have a barcode. This "file" is just the ones WITH a barcode -
+    // what scanning needs - and saving matches on the barcode, so the
+    // products made by price checks are never touched by it.)
     'products': {
         table: 'dbo.products',
         key: ['barcode'],
         mergeSave: true,
         keepMissing: true,
+        readWhere: 't.barcode IS NOT NULL',
         addMissingIngredients: 'ingredient',
         orderBy: 'barcode',
         columns: [
@@ -339,6 +367,7 @@ const TABLES = {
             ingredientLink('name', true),
             { csv: 'brand', type: 'NVARCHAR(100)', kind: 'text' },
             { csv: 'product_name', type: 'NVARCHAR(300)', kind: 'text' },
+            { csv: 'package_size', type: 'NVARCHAR(50)', kind: 'text' },
             { csv: 'quantity', type: 'DECIMAL(12,3)', kind: 'number' },
             { csv: 'unit', type: 'NVARCHAR(20)', kind: 'text' },
             { csv: 'location', column: 'location_code', type: 'NVARCHAR(50)', kind: 'text', lookup: LOCATION_CODE_LOOKUP },
@@ -842,56 +871,155 @@ function appendRows(file, rows, callback) {
 // script, and were taken out with it.)
 
 // -------------------------------------------------------------
-// LINKING SUPERMARKET PRODUCT CODES TO BARCODES (UPDATE, phase 5)
+// SAVING PRICES (UPDATE, phase 7)
 // -------------------------------------------------------------
-// links: [{ store, product_code, barcode, brand, product_name }, ...]
-// e.g. a Woolworths search result that came with its barcode.
+// (This replaces phase 5's linkStoreProducts(): the barcode is now just
+// a column on the product, and every price points at a product.)
 //
-// In one transaction:
-// 1. any barcode not in the products table yet is added as a product
-//    (source 'supermarket'), with the brand and name the supermarket
-//    gave - no name of yours or ingredient yet, those come when it's
-//    scanned at home. A product that's already there is left alone.
-// 2. the store's CHAIN + product code is linked to that barcode in
-//    store_products (or re-linked, if it pointed somewhere else).
-//    A store with no chain set can't be linked, so it's skipped.
+// rows: prices laid out like a 'prices.csv' row, plus brand and
+// barcode if the supermarket sent them. In one transaction:
+// 1. any store not in the stores table yet is added (switched off)
+// 2. each price's "code": the supermarket's product code, or for a
+//    store with none (Trents) "name:" + its saved name
+// 3. a code not linked to a product yet, sent WITH a barcode we already
+//    know, is linked to that barcode's product
+// 4. any code still unknown gets a new product (named from the price,
+//    source 'price check') and is linked to it. MERGE rather than
+//    INSERT, so OUTPUT can hand back each new product_id next to the
+//    code it was made for.
+// 5. the prices are added, each with its product_id
+// The chain comes from the stores table; a store with no chain uses
+// its own name as the chain.
 // -------------------------------------------------------------
-async function linkStoreProductsAsync(links) {
-    const usable = links.filter(link => link.store && link.product_code && link.barcode);
-    if (usable.length === 0) return;
+async function savePricesAsync(rows) {
+    if (rows.length === 0) return;
+    const definition = tableFor('prices.csv');
+    const prepared = spreadTimes(rows, definition).map(row => ({
+        store: String(row.store || ''),
+        item_name: String(row.item_name || ''),
+        date_checked: row.date_checked,
+        price: toDatabaseValue(row.price, { kind: 'number' }),
+        cup_price: toDatabaseValue(row.cup_price, { kind: 'number' }),
+        cup_measure: toDatabaseValue(row.cup_measure, { kind: 'text' }),
+        package_size: toDatabaseValue(row.package_size, { kind: 'text' }),
+        original_name: toDatabaseValue(row.original_name, { kind: 'text' }),
+        product_code: toDatabaseValue(row.product_code, { kind: 'text' }),
+        barcode: toDatabaseValue(row.barcode, { kind: 'text' }),
+        brand: toDatabaseValue(row.brand, { kind: 'text' }),
+        is_special: toDatabaseValue(row.is_special, { kind: 'yesno' }),
+        was_price: toDatabaseValue(row.was_price, { kind: 'number' }),
+        special_type: toDatabaseValue(row.special_type, { kind: 'text' }),
+        special_note: toDatabaseValue(row.special_note, { kind: 'text' })
+    }));
 
     await runBatch(request => {
-        request.input('links', sql.NVarChar(sql.MAX), JSON.stringify(usable.map(link => ({
-            store: String(link.store),
-            product_code: String(link.product_code),
-            barcode: String(link.barcode),
-            brand: link.brand ? String(link.brand) : null,
-            product_name: link.product_name ? String(link.product_name) : null
-        }))));
-        const unpacked = `OPENJSON(@links) WITH (store NVARCHAR(100), product_code NVARCHAR(50), barcode NVARCHAR(50), ` +
-            `brand NVARCHAR(100), product_name NVARCHAR(300)) AS src`;
+        request.input('rows', sql.NVarChar(sql.MAX), JSON.stringify(prepared));
         return `SET XACT_ABORT ON;
 BEGIN TRANSACTION;
 DECLARE @today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'New Zealand Standard Time' AS DATE);
 
-INSERT INTO dbo.products (barcode, brand, product_name, source, date_added)
-SELECT src.barcode, MAX(src.brand), MAX(src.product_name), 'supermarket', @today
-FROM ${unpacked}
-WHERE NOT EXISTS (SELECT 1 FROM dbo.products AS p WHERE p.barcode = src.barcode)
-GROUP BY src.barcode;
+DECLARE @new TABLE (
+    store NVARCHAR(100), item_name NVARCHAR(300), date_checked DATETIMEOFFSET(3),
+    price DECIMAL(10,2), cup_price DECIMAL(10,2), cup_measure NVARCHAR(50), package_size NVARCHAR(50),
+    original_name NVARCHAR(300), product_code NVARCHAR(50), barcode NVARCHAR(50), brand NVARCHAR(100),
+    is_special BIT, was_price DECIMAL(10,2), special_type NVARCHAR(20), special_note NVARCHAR(100),
+    chain NVARCHAR(50), code_key NVARCHAR(320)
+);
+INSERT INTO @new (store, item_name, date_checked, price, cup_price, cup_measure, package_size, original_name,
+                  product_code, barcode, brand, is_special, was_price, special_type, special_note)
+SELECT store, item_name, date_checked, price, cup_price, cup_measure, package_size, original_name,
+       NULLIF(product_code, ''), NULLIF(barcode, ''), brand, ISNULL(is_special, 0), was_price, special_type, special_note
+FROM OPENJSON(@rows) WITH (
+    store NVARCHAR(100), item_name NVARCHAR(300), date_checked DATETIMEOFFSET(3),
+    price DECIMAL(10,2), cup_price DECIMAL(10,2), cup_measure NVARCHAR(50), package_size NVARCHAR(50),
+    original_name NVARCHAR(300), product_code NVARCHAR(50), barcode NVARCHAR(50), brand NVARCHAR(100),
+    is_special BIT, was_price DECIMAL(10,2), special_type NVARCHAR(20), special_note NVARCHAR(100)
+);
 
-MERGE dbo.store_products AS target
+INSERT INTO dbo.stores (store_name, is_active)
+SELECT DISTINCT n.store, 0 FROM @new AS n
+WHERE NOT EXISTS (SELECT 1 FROM dbo.stores AS st WHERE st.store_name = n.store);
+
+UPDATE n
+SET chain = ISNULL(st.chain, st.store_name),
+    code_key = ISNULL(n.product_code, N'name:' + n.item_name)
+FROM @new AS n
+JOIN dbo.stores AS st ON st.store_name = n.store;
+
+INSERT INTO dbo.store_products (chain, product_code, product_id, date_linked)
+SELECT n.chain, n.code_key, MAX(p.product_id), @today
+FROM @new AS n
+JOIN dbo.products AS p ON p.barcode = n.barcode
+WHERE NOT EXISTS (SELECT 1 FROM dbo.store_products AS sp WHERE sp.chain = n.chain AND sp.product_code = n.code_key)
+GROUP BY n.chain, n.code_key;
+
+DECLARE @made TABLE (product_id INT, chain NVARCHAR(50), product_code NVARCHAR(320));
+MERGE dbo.products AS t
 USING (
-    SELECT st.chain, src.product_code, MAX(src.barcode) AS barcode
-    FROM ${unpacked}
-    JOIN dbo.stores AS st ON st.store_name = src.store
-    WHERE st.chain IS NOT NULL
-    GROUP BY st.chain, src.product_code
-) AS s
-ON target.chain = s.chain AND target.product_code = s.product_code
-WHEN MATCHED AND target.barcode <> s.barcode THEN UPDATE SET barcode = s.barcode, date_linked = @today
-WHEN NOT MATCHED BY TARGET THEN INSERT (chain, product_code, barcode, date_linked) VALUES (s.chain, s.product_code, s.barcode, @today);
+    SELECT g.chain, g.code_key, g.brand, g.product_name, g.package_size,
+           CASE WHEN g.barcode IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.products AS p WHERE p.barcode = g.barcode)
+                THEN g.barcode END AS barcode
+    FROM (
+        SELECT n.chain, n.code_key, MAX(n.brand) AS brand, MAX(n.original_name) AS product_name,
+               MAX(n.package_size) AS package_size, MAX(n.barcode) AS barcode
+        FROM @new AS n
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.store_products AS sp WHERE sp.chain = n.chain AND sp.product_code = n.code_key)
+        GROUP BY n.chain, n.code_key
+    ) AS g
+) AS s ON 1 = 0
+WHEN NOT MATCHED THEN
+    INSERT (barcode, brand, product_name, package_size, source, date_added)
+    VALUES (s.barcode, s.brand, s.product_name, s.package_size, 'price check', @today)
+OUTPUT inserted.product_id, s.chain, s.code_key INTO @made;
+
+INSERT INTO dbo.store_products (chain, product_code, product_id, date_linked)
+SELECT chain, product_code, product_id, @today FROM @made;
+
+INSERT INTO dbo.prices (store_name, product_id, date_checked, item_name, price, cup_price, cup_measure, package_size,
+                        original_name, product_code, is_special, was_price, special_type, special_note)
+SELECT n.store, sp.product_id, n.date_checked, n.item_name, n.price, n.cup_price, n.cup_measure, n.package_size,
+       n.original_name, n.product_code, n.is_special, n.was_price, n.special_type, n.special_note
+FROM @new AS n
+JOIN dbo.store_products AS sp ON sp.chain = n.chain AND sp.product_code = n.code_key;
 COMMIT TRANSACTION;`;
+    });
+}
+
+// The callback version: callback(err).
+function savePrices(rows, callback) {
+    savePricesAsync(rows).then(() => callback(null), err => {
+        console.error('Database: could not save prices:', err.message);
+        callback(err);
+    });
+}
+
+// -------------------------------------------------------------
+// LINKING A BARCODE (UPDATE, phase 7)
+// -------------------------------------------------------------
+// Links a barcode to a store's product code, through
+// dbo.usp_link_barcode (see database/product-ids-upgrade.sql): if the
+// barcode's product and the code's product turn out to be two
+// different rows, they're merged into one, so that product's prices
+// from every supermarket end up together. store is a store name - its
+// chain is looked up here (a store with no chain uses its own name).
+// (Nothing calls this yet - it's for linking PAK'nSAVE codes when a
+// product is scanned at home, which comes next.)
+// -------------------------------------------------------------
+async function linkBarcodeAsync(store, productCode, barcode) {
+    await runBatch(request => {
+        request.input('store', sql.NVarChar(100), String(store));
+        request.input('product_code', sql.NVarChar(320), String(productCode));
+        request.input('barcode', sql.NVarChar(50), String(barcode));
+        return `DECLARE @chain NVARCHAR(50) = (SELECT ISNULL(chain, store_name) FROM dbo.stores WHERE store_name = @store);
+IF @chain IS NULL THROW 50010, 'Unknown store', 1;
+EXEC dbo.usp_link_barcode @chain = @chain, @product_code = @product_code, @barcode = @barcode;`;
+    });
+}
+
+function linkBarcode(store, productCode, barcode, callback) {
+    linkBarcodeAsync(store, productCode, barcode).then(() => callback(null), err => {
+        console.error('Database: could not link barcode:', err.message);
+        callback(err);
     });
 }
 
@@ -915,14 +1043,6 @@ function refreshWarehouse(callback) {
     });
 }
 
-// The callback version: callback(err).
-function linkStoreProducts(links, callback) {
-    linkStoreProductsAsync(links).then(() => callback(null), err => {
-        console.error('Database: could not link supermarket product codes to barcodes:', err.message);
-        callback(err);
-    });
-}
-
 module.exports = {
     enabled,
     TABLES,
@@ -933,6 +1053,7 @@ module.exports = {
     appendRows,
     saveMany,
     saveManyAsync,
-    linkStoreProducts,
+    savePrices,
+    linkBarcode,
     refreshWarehouse
 };
