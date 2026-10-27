@@ -378,7 +378,9 @@ function savePrice(result) {
             is_special: result.isSpecial,
             was_price: result.wasPrice,
             special_type: result.specialType,
-            special_note: result.specialNote
+            special_note: result.specialNote,
+            // (UPDATE) Trents' Gilmours code, if it has one
+            gilmours_code: result.gilmoursCode
         })
     })
         .then(response => response.json())
@@ -1035,7 +1037,9 @@ function watchProduct(result, button) {
             is_special: result.isSpecial,
             was_price: result.wasPrice,
             special_type: result.specialType,
-            special_note: result.specialNote
+            special_note: result.specialNote,
+            // (UPDATE) Trents' Gilmours code, if it has one
+            gilmours_code: result.gilmoursCode
         })
     })
         .then(response => {

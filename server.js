@@ -1525,9 +1525,8 @@ async function searchTrents(searchTerm) {
                 // (UPDATE, phase 7) Trents' own product code - the
                 // hidden "SKU: 3186629" line in each tile (confirmed from
                 // a copy of the tile's HTML). Each tile also has a
-                // data-fan number (e.g. 5005285), which looks like the
-                // Foodstuffs article number Pak'nSAVE's codes start with
-                // - kept as fan for now, unused, until that's confirmed.
+                // data-fan number (e.g. 5005285) - Gilmours' code for it
+                // (see gilmoursCode below).
                 const skuText = item.querySelector('.cc_product_sku')?.textContent || '';
                 const sku = (skuText.match(/\d+/) || [null])[0];
                 const fan = item.querySelector('[data-fan]')?.getAttribute('data-fan') || null;
@@ -1566,7 +1565,12 @@ async function searchTrents(searchTerm) {
             // prices were linked by name - savePrices() in database.js
             // joins the two up.
             productCode: product.sku || null,
-            foodstuffsCode: product.fan || null
+            // (UPDATE) the data-fan number is Foodstuffs North Island's
+            // (Gilmours') code for the product - NOT Pak'nSAVE's (checked
+            // with Pams baked beans). Trents is due to become Gilmours,
+            // so it's linked now, under the chain 'Gilmours' - see
+            // savePrices() in database.js.
+            gilmoursCode: product.fan || null
         };
     });
 }
@@ -1664,7 +1668,9 @@ function productFieldsFrom(result) {
         is_special: isSpecial === true || isSpecial === 'yes' ? 'yes' : '',
         was_price: result.wasPrice !== undefined ? result.wasPrice : (result.was_price || ''),
         special_type: result.specialType || result.special_type || '',
-        special_note: result.specialNote || result.special_note || ''
+        special_note: result.specialNote || result.special_note || '',
+        // (UPDATE) Trents' Gilmours code - see savePrices() in database.js
+        gilmours_code: result.gilmoursCode || result.gilmours_code || ''
     };
 }
 

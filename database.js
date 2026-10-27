@@ -893,6 +893,11 @@ function appendRows(file, rows, callback) {
 //    source 'price check') and is linked to it. MERGE rather than
 //    INSERT, so OUTPUT can hand back each new product_id next to the
 //    code it was made for.
+// 4b. (UPDATE) a Trents price's Gilmours code (the data-fan number -
+//    Foodstuffs North Island's code for the same product) is linked to
+//    the same product under the chain 'Gilmours'. Trents is due to
+//    become Gilmours, so when the search starts sending Gilmours codes,
+//    they're already linked to the right products.
 // 5. the prices are added, each with its product_id
 // The chain comes from the stores table; a store with no chain uses
 // its own name as the chain.
@@ -915,7 +920,8 @@ async function savePricesAsync(rows) {
         is_special: toDatabaseValue(row.is_special, { kind: 'yesno' }),
         was_price: toDatabaseValue(row.was_price, { kind: 'number' }),
         special_type: toDatabaseValue(row.special_type, { kind: 'text' }),
-        special_note: toDatabaseValue(row.special_note, { kind: 'text' })
+        special_note: toDatabaseValue(row.special_note, { kind: 'text' }),
+        gilmours_code: toDatabaseValue(row.gilmours_code, { kind: 'text' })
     }));
 
     await runBatch(request => {
@@ -929,17 +935,19 @@ DECLARE @new TABLE (
     price DECIMAL(10,2), cup_price DECIMAL(10,2), cup_measure NVARCHAR(50), package_size NVARCHAR(50),
     original_name NVARCHAR(300), product_code NVARCHAR(50), barcode NVARCHAR(50), brand NVARCHAR(100),
     is_special BIT, was_price DECIMAL(10,2), special_type NVARCHAR(20), special_note NVARCHAR(100),
-    chain NVARCHAR(50), code_key NVARCHAR(320)
+    gilmours_code NVARCHAR(50), chain NVARCHAR(50), code_key NVARCHAR(320)
 );
 INSERT INTO @new (store, item_name, date_checked, price, cup_price, cup_measure, package_size, original_name,
-                  product_code, barcode, brand, is_special, was_price, special_type, special_note)
+                  product_code, barcode, brand, is_special, was_price, special_type, special_note, gilmours_code)
 SELECT store, item_name, date_checked, price, cup_price, cup_measure, package_size, original_name,
-       NULLIF(product_code, ''), NULLIF(barcode, ''), brand, ISNULL(is_special, 0), was_price, special_type, special_note
+       NULLIF(product_code, ''), NULLIF(barcode, ''), brand, ISNULL(is_special, 0), was_price, special_type, special_note,
+       NULLIF(gilmours_code, '')
 FROM OPENJSON(@rows) WITH (
     store NVARCHAR(100), item_name NVARCHAR(300), date_checked DATETIMEOFFSET(3),
     price DECIMAL(10,2), cup_price DECIMAL(10,2), cup_measure NVARCHAR(50), package_size NVARCHAR(50),
     original_name NVARCHAR(300), product_code NVARCHAR(50), barcode NVARCHAR(50), brand NVARCHAR(100),
-    is_special BIT, was_price DECIMAL(10,2), special_type NVARCHAR(20), special_note NVARCHAR(100)
+    is_special BIT, was_price DECIMAL(10,2), special_type NVARCHAR(20), special_note NVARCHAR(100),
+    gilmours_code NVARCHAR(50)
 );
 
 INSERT INTO dbo.stores (store_name, is_active)
@@ -988,6 +996,14 @@ OUTPUT inserted.product_id, s.chain, s.code_key INTO @made;
 
 INSERT INTO dbo.store_products (chain, product_code, product_id, date_linked)
 SELECT chain, product_code, product_id, @today FROM @made;
+
+INSERT INTO dbo.store_products (chain, product_code, product_id, date_linked)
+SELECT 'Gilmours', n.gilmours_code, MAX(sp.product_id), @today
+FROM @new AS n
+JOIN dbo.store_products AS sp ON sp.chain = n.chain AND sp.product_code = n.code_key
+WHERE n.gilmours_code IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM dbo.store_products AS g WHERE g.chain = 'Gilmours' AND g.product_code = n.gilmours_code)
+GROUP BY n.gilmours_code;
 
 INSERT INTO dbo.prices (store_name, product_id, date_checked, item_name, price, cup_price, cup_measure, package_size,
                         original_name, product_code, is_special, was_price, special_type, special_note)
