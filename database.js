@@ -882,11 +882,14 @@ function appendRows(file, rows, callback) {
 // barcode if the supermarket sent them. In one transaction:
 // 1. any store not in the stores table yet is added (switched off)
 // 2. each price's "code": the supermarket's product code, or for a
-//    store with none (Trents) "name:" + its saved name
+//    price with none "name:" + its saved name + "|" + its pack size
+//    (UPDATE: the size is part of it - the saved name has the size
+//    taken off, so "name:" alone merged a 250g and a 2kg into one
+//    product. e.g. "name:Anchor Original Cream Cheese|250g")
 // 3. a code not linked to a product yet, sent WITH a barcode we already
 //    know, is linked to that barcode's product
-// 3b. (UPDATE) a real code not linked yet, for a name that WAS saved
-//    by name before (e.g. Trents prices from before Trents' SKU was
+// 3b. (UPDATE) a real code not linked yet, for a name AND pack size
+//    that WAS saved by name before (e.g. Trents prices from before Trents' SKU was
 //    read - "name:Gilmours Tomato Sauce"), is linked to that same
 //    product - so its price history carries straight on
 // 4. any code still unknown gets a new product (named from the price,
@@ -935,7 +938,7 @@ DECLARE @new TABLE (
     price DECIMAL(10,2), cup_price DECIMAL(10,2), cup_measure NVARCHAR(50), package_size NVARCHAR(50),
     original_name NVARCHAR(300), product_code NVARCHAR(50), barcode NVARCHAR(50), brand NVARCHAR(100),
     is_special BIT, was_price DECIMAL(10,2), special_type NVARCHAR(20), special_note NVARCHAR(100),
-    gilmours_code NVARCHAR(50), chain NVARCHAR(50), code_key NVARCHAR(320)
+    gilmours_code NVARCHAR(50), chain NVARCHAR(50), code_key NVARCHAR(320), name_key NVARCHAR(320)
 );
 INSERT INTO @new (store, item_name, date_checked, price, cup_price, cup_measure, package_size, original_name,
                   product_code, barcode, brand, is_special, was_price, special_type, special_note, gilmours_code)
@@ -956,9 +959,11 @@ WHERE NOT EXISTS (SELECT 1 FROM dbo.stores AS st WHERE st.store_name = n.store);
 
 UPDATE n
 SET chain = ISNULL(st.chain, st.store_name),
-    code_key = ISNULL(n.product_code, N'name:' + n.item_name)
+    name_key = N'name:' + LEFT(n.item_name, 250) + N'|' + LOWER(REPLACE(ISNULL(n.package_size, ''), ' ', ''))
 FROM @new AS n
 JOIN dbo.stores AS st ON st.store_name = n.store;
+
+UPDATE @new SET code_key = ISNULL(product_code, name_key);
 
 INSERT INTO dbo.store_products (chain, product_code, product_id, date_linked)
 SELECT n.chain, n.code_key, MAX(p.product_id), @today
@@ -970,7 +975,7 @@ GROUP BY n.chain, n.code_key;
 INSERT INTO dbo.store_products (chain, product_code, product_id, date_linked)
 SELECT n.chain, n.code_key, MAX(byname.product_id), @today
 FROM @new AS n
-JOIN dbo.store_products AS byname ON byname.chain = n.chain AND byname.product_code = N'name:' + n.item_name
+JOIN dbo.store_products AS byname ON byname.chain = n.chain AND byname.product_code = n.name_key
 WHERE n.product_code IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM dbo.store_products AS sp WHERE sp.chain = n.chain AND sp.product_code = n.code_key)
 GROUP BY n.chain, n.code_key;

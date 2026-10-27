@@ -85,6 +85,7 @@ This is intended to help with a couple of issues:
 | `database/warehouse.sql` | The reports warehouse: the galaxy schema tables and the procedure that loads them (safe to re-run) |
 | `database/reporting-views.sql` | The phase 4 star schema views for price reports (safe to re-run) |
 | `database/reports-login.sql` | Creates the read-only `pantry_reports` login for Power BI |
+| `database/fix-pack-sizes.sql` | One-off fix after phase 7: splits products that had two pack sizes merged under one name |
 | `database/link-trents-code.sql` | Gives an older Trents product its Trents SKU and Gilmours code, one product at a time |
 | `database/check-migration.sql` | Queries to check the data is all there |
 | `docs/database-design.md` | The database design, with crow's foot and UML diagrams |
